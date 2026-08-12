@@ -234,10 +234,24 @@ function ProfileRow({ label, value }) {
 }
 
 /* ─── Profile panel — shows the real signed-in Supabase user (email,
-   member-since from user.created_at) plus a working sign-out control.
-   Display-name/password editing still isn't wired up. ── */
-function ProfilePanel({ user }) {
+   member-since from user.created_at, display name from public.profiles
+   via Cal.getDisplayName/setDisplayName) plus a working sign-out control.
+   Name editing lives right here: an inline "Edit" -> text field -> Save,
+   same pattern as the rest of the app's inline-edit affordances. ── */
+function ProfilePanel({ user, displayName, onNameChange }) {
   const [signingOut, setSigningOut] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [nameInput, setNameInput] = useState(displayName || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  // Keep the input in sync if the loaded name changes out from under us
+  // (e.g. slow initial fetch resolving after this component already
+  // mounted) — but only while not actively mid-edit, so we never clobber
+  // something the user is in the middle of typing.
+  useEffect(() => {
+    if (!editing) setNameInput(displayName || '');
+  }, [displayName]);
 
   if (!user) {
     return (
@@ -251,7 +265,7 @@ function ProfilePanel({ user }) {
     );
   }
 
-  const initial = (user.email || '?').charAt(0).toUpperCase();
+  const initial = ((displayName || user.email || '?').charAt(0)).toUpperCase();
   const memberSince = user.created_at
     ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : '—';
@@ -261,6 +275,37 @@ function ProfilePanel({ user }) {
     setSigningOut(true);
     await Cal.signOut();
   }
+
+  function startEditing() {
+    setNameInput(displayName || '');
+    setError('');
+    setEditing(true);
+  }
+  function cancelEditing() {
+    setNameInput(displayName || '');
+    setError('');
+    setEditing(false);
+  }
+  async function handleSaveName() {
+    const trimmed = nameInput.trim();
+    if (!trimmed) { setError("Name can't be empty."); return; }
+    setSaving(true);
+    setError('');
+    const ok = await Cal.setDisplayName(trimmed);
+    setSaving(false);
+    if (ok) {
+      onNameChange(trimmed);
+      setEditing(false);
+    } else {
+      setError("Couldn't save — try again.");
+    }
+  }
+
+  const inputStyle = {
+    flex: 1, padding: '8px 12px', borderRadius: 10,
+    border: '1px solid var(--border)', background: 'var(--surface)',
+    color: 'var(--text-primary)', fontSize: 13.5, fontFamily: 'inherit', outline: 'none',
+  };
 
   return (
     <div style={{
@@ -277,23 +322,59 @@ function ProfilePanel({ user }) {
           boxShadow: '0 4px 16px color-mix(in srgb, var(--accent-primary) 35%, transparent)',
         }}>{initial}</div>
         <div>
-          <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.25 }}>{user.email}</div>
-          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>New here — starting with a blank schedule</div>
+          <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.25 }}>{displayName || user.email}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>{user.email}</div>
         </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 4 }}>Name</div>
+          {editing ? (
+            <div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="text" value={nameInput} autoFocus
+                  onChange={e => setNameInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') cancelEditing(); }}
+                  style={inputStyle} disabled={saving}
+                />
+                <button
+                  onClick={handleSaveName} disabled={saving}
+                  style={{
+                    padding: '8px 14px', borderRadius: 10, border: 'none', flexShrink: 0,
+                    background: saving ? 'var(--border)' : 'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))',
+                    color: saving ? 'var(--text-muted)' : 'white', fontSize: 13, fontWeight: 600,
+                    fontFamily: 'inherit', cursor: saving ? 'default' : 'pointer',
+                  }}
+                >{saving ? 'Saving…' : 'Save'}</button>
+                <button
+                  onClick={cancelEditing} disabled={saving}
+                  style={{
+                    padding: '8px 14px', borderRadius: 10, flexShrink: 0,
+                    border: '1px solid var(--border)', background: 'var(--surface)',
+                    color: 'var(--text-primary)', fontSize: 13, fontWeight: 600,
+                    fontFamily: 'inherit', cursor: saving ? 'default' : 'pointer',
+                  }}
+                >Cancel</button>
+              </div>
+              {error && <div style={{ fontSize: 12, color: 'var(--cat-health)', fontWeight: 500, marginTop: 6 }}>{error}</div>}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: 14, color: 'var(--text-primary)' }}>{displayName || '—'}</div>
+              <a onClick={startEditing} style={{ fontSize: 12.5, color: 'var(--accent-hover)', fontWeight: 600, cursor: 'pointer' }}>Edit</a>
+            </div>
+          )}
+        </div>
         <ProfileRow label="Email" value={user.email} />
         <ProfileRow label="Member since" value={memberSince} />
       </div>
 
       <div style={{
         marginTop: 22, paddingTop: 18, borderTop: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        display: 'flex', justifyContent: 'flex-end',
       }}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          Profile editing isn't available yet.
-        </div>
         <button
           onClick={handleSignOut}
           disabled={signingOut}
@@ -337,13 +418,15 @@ function App() {
   const [spinning, setSpinning] = useState(false);
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState(null);
+  const [displayName, setDisplayName] = useState('');
 
   useEffect(() => {
     (async () => {
       const session = await Cal.requireSession();
       if (!session) return; // Cal.requireSession already redirected to login.html
-      const u = await Cal.getUser();
+      const [u, name] = await Promise.all([Cal.getUser(), Cal.getDisplayName()]);
       setUser(u);
+      setDisplayName(name);
       setReady(true);
     })();
   }, []);
@@ -409,7 +492,7 @@ function App() {
       </div>
 
       {tab === 'appearance' && <AppearancePanel theme={theme} />}
-      {tab === 'profile' && <ProfilePanel user={user} />}
+      {tab === 'profile' && <ProfilePanel user={user} displayName={displayName} onNameChange={setDisplayName} />}
       {tab === 'privacy' && <StubPanel label="Privacy & Security" />}
 
     </div>
