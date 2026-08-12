@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Calendar — Sign in</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Theme tokens — same block every other page defines ────────── */
+    :root {
+      --bg-primary: #F6FAFD;
+      --bg-gradient: linear-gradient(135deg, #EFF6FC 0%, #DDEBF7 100%);
+      --surface: #FFFFFF;
+      --surface-elevated: rgba(255, 255, 255, 0.7);
+      --border: rgba(120, 175, 224, 0.25);
+      --text-primary: #22283A;
+      --text-secondary: #5C6B80;
+      --text-muted: #93A2B8;
+      --accent-primary: #5AAEE8;
+      --accent-secondary: #A8D4F2;
+      --accent-hover: #3E93D6;
+      --cat-health: #E08F8F;
+    }
+    [data-theme="dark"] {
+      --bg-primary: #1C1D21;
+      --bg-gradient: linear-gradient(135deg, #1C1D21 0%, #14151A 100%);
+      --surface: #24252B;
+      --surface-elevated: rgba(30, 33, 42, 0.7);
+      --border: rgba(212, 175, 55, 0.15);
+      --text-primary: #ECEAF2;
+      --text-secondary: #A8A6B5;
+      --text-muted: #6E6C7A;
+      --accent-primary: #D4AF37;
+      --accent-secondary: #1B2A4A;
+      --accent-hover: #E8C158;
+      --cat-health: #B0605F;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      display: flex; align-items: center; justify-content: center;
+    }
+  </style>
+</head>
+<body>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('cal_theme');
+      if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
+  })();
+</script>
+<div id="root"></div>
+
+<script src="supabase-client.js"></script>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+function App() {
+  const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Already signed in? Skip straight past the form rather than making a
+  // returning user re-enter credentials.
+  useEffect(() => {
+    Cal.redirectIfSignedIn().then(() => setCheckingSession(false));
+  }, []);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(''); setNotice(''); setBusy(true);
+    try {
+      if (mode === 'signin') {
+        const { error } = await Cal.signIn(email, password);
+        if (error) throw error;
+        window.location.href = 'index.html';
+      } else {
+        const { error } = await Cal.signUp(email, password, name);
+        if (error) throw error;
+        setNotice('Account created — check your email to confirm, then sign in.');
+        setMode('signin');
+      }
+    } catch (err) {
+      setError(err.message || 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inputStyle = {
+    width: '100%', padding: '11px 14px', borderRadius: 12,
+    border: '1px solid var(--border)', background: 'var(--surface)',
+    color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit', outline: 'none',
+  };
+
+  if (checkingSession) return null;
+
+  return (
+    <div style={{
+      width: '100%', maxWidth: 380, margin: '0 20px',
+      background: 'var(--surface-elevated)', border: '1px solid var(--border)',
+      borderRadius: 24, padding: '32px 28px', backdropFilter: 'blur(14px)',
+      boxShadow: '0 12px 40px color-mix(in srgb, var(--text-primary) 12%, transparent)',
+    }}>
+      <div style={{ textAlign: 'center', marginBottom: 26 }}>
+        <div style={{ fontSize: 28, marginBottom: 6 }}>✦</div>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)' }}>
+          {mode === 'signin' ? 'Welcome back' : 'Create your account'}
+        </h1>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 5 }}>
+          {mode === 'signin' ? 'Sign in to your calendar.' : 'Takes a few seconds.'}
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {mode === 'signup' && (
+          <input
+            type="text" required placeholder="Your name" value={name}
+            onChange={e => setName(e.target.value)} style={inputStyle} autoComplete="name"
+          />
+        )}
+        <input
+          type="email" required placeholder="Email" value={email}
+          onChange={e => setEmail(e.target.value)} style={inputStyle} autoComplete="email"
+        />
+        <input
+          type="password" required placeholder="Password" value={password}
+          onChange={e => setPassword(e.target.value)} style={inputStyle}
+          autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+          minLength={6}
+        />
+
+        {error && <div style={{ fontSize: 12.5, color: 'var(--cat-health)', fontWeight: 500 }}>{error}</div>}
+        {notice && <div style={{ fontSize: 12.5, color: 'var(--accent-hover)', fontWeight: 500 }}>{notice}</div>}
+
+        <button
+          type="submit" disabled={busy}
+          style={{
+            marginTop: 4, padding: '12px 18px', borderRadius: 14, border: 'none',
+            cursor: busy ? 'default' : 'pointer',
+            background: busy ? 'var(--border)' : 'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))',
+            color: busy ? 'var(--text-muted)' : 'white',
+            fontSize: 14, fontWeight: 600, fontFamily: 'inherit',
+          }}
+        >{busy ? 'One moment…' : (mode === 'signin' ? 'Sign in' : 'Sign up')}</button>
+      </form>
+
+      <div style={{ textAlign: 'center', marginTop: 18, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+        {mode === 'signin' ? (
+          <span>New here?{' '}
+            <a onClick={() => { setMode('signup'); setError(''); setNotice(''); }} style={{ color: 'var(--accent-hover)', fontWeight: 600, cursor: 'pointer' }}>Create an account</a>
+          </span>
+        ) : (
+          <span>Already have one?{' '}
+            <a onClick={() => { setMode('signin'); setError(''); setNotice(''); }} style={{ color: 'var(--accent-hover)', fontWeight: 600, cursor: 'pointer' }}>Sign in</a>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

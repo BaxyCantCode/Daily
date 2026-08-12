@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Calendar — Action</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="supabase-client.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Theme tokens — "Yin" (light) / "Yang" (dark) ────────────── */
+    :root {
+      --bg-primary: #F6FAFD;
+      --bg-gradient: linear-gradient(135deg, #EFF6FC 0%, #DDEBF7 100%);
+      --surface: #FFFFFF;
+      --surface-elevated: rgba(255, 255, 255, 0.7);
+      --border: rgba(120, 175, 224, 0.25);
+      --text-primary: #22283A;
+      --text-secondary: #5C6B80;
+      --text-muted: #93A2B8;
+      --accent-primary: #5AAEE8;
+      --accent-secondary: #A8D4F2;
+      --accent-hover: #3E93D6;
+      --cat-work: #3F9E8F;
+      --cat-personal: #E0A8C9;
+      --cat-social: #F0C078;
+      --cat-travel: #8FD0B8;
+      --cat-free: #C4C0D8;
+      --cat-health: #E08F8F;
+    }
+    [data-theme="dark"] {
+      --bg-primary: #1C1D21;
+      --bg-gradient: linear-gradient(135deg, #1C1D21 0%, #14151A 100%);
+      --surface: #24252B;
+      --surface-elevated: rgba(30, 33, 42, 0.7);
+      --border: rgba(212, 175, 55, 0.15);
+      --text-primary: #ECEAF2;
+      --text-secondary: #A8A6B5;
+      --text-muted: #6E6C7A;
+      --accent-primary: #D4AF37;
+      --accent-secondary: #1B2A4A;
+      --accent-hover: #E8C158;
+      --cat-work: #2E8A78;
+      --cat-personal: #B0729A;
+      --cat-social: #D4AF37;
+      --cat-travel: #4A9B82;
+      --cat-free: #5A5870;
+      --cat-health: #B0605F;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.25s ease, color 0.25s ease;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent-primary) 35%, transparent); border-radius: 4px; }
+    @keyframes yy-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('cal_theme');
+      if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
+  })();
+</script>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+/* ─── Nav bar ──────────────────────────────────────────────────── */
+function Nav({ page }) {
+  const pages = [
+    { label: 'Today', href: 'index.html', key: 'today' },
+    { label: 'Calendar', href: 'calendar.html', key: 'calendar' },
+    { label: 'Action', href: 'action.html', key: 'action' },
+    { label: '✦ Bot', href: 'bot.html', key: 'bot' },
+  ];
+  return (
+    <div style={{
+      display: 'flex', gap: 4, alignItems: 'center',
+      background: 'var(--surface-elevated)',
+      border: '1px solid var(--border)',
+      borderRadius: 24, padding: '5px 6px',
+      backdropFilter: 'blur(12px)',
+    }}>
+      {pages.map(p => (
+        <a key={p.key} href={p.href} style={{
+          padding: '6px 16px', borderRadius: 20,
+          fontSize: 13, fontWeight: 500,
+          textDecoration: 'none',
+          background: p.key === page ? 'color-mix(in srgb, var(--accent-primary) 18%, transparent)' : 'transparent',
+          color: p.key === page ? 'var(--accent-hover)' : 'var(--text-secondary)',
+          border: p.key === page ? '1px solid color-mix(in srgb, var(--accent-primary) 28%, transparent)' : '1px solid transparent',
+          transition: 'all 0.15s ease',
+        }}>{p.label}</a>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Settings gear ──────────────────────────────────────────────── */
+function SettingsGear() {
+  return (
+    <a href="settings.html" title="Settings" style={{
+      width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--surface-elevated)',
+      border: '2px solid var(--border)',
+      color: 'var(--text-secondary)', fontSize: 26, fontWeight: 600,
+      textDecoration: 'none',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 2px 10px color-mix(in srgb, var(--text-primary) 8%, transparent)',
+      transition: 'transform 0.15s ease',
+    }}><span style={{ display: 'inline-block', transform: 'translateY(-2px)' }}>⚙</span></a>
+  );
+}
+
+/* ─── Category color helper — derives bg/border/text/tag/swatch
+   from the single --cat-X token so both themes stay in sync purely
+   via CSS, no JS re-render needed on toggle. ──────────────────── */
+function catStyle(name) {
+  const v = 'var(--cat-' + name + ')';
+  return {
+    bg: 'color-mix(in srgb, ' + v + ' 20%, var(--surface))',
+    bd: 'color-mix(in srgb, ' + v + ' 55%, transparent)',
+    tx: 'color-mix(in srgb, ' + v + ' 68%, var(--text-primary))',
+    tg: 'color-mix(in srgb, ' + v + ' 30%, transparent)',
+    sw: v,
+  };
+}
+const C = {
+  work: catStyle('work'), personal: catStyle('personal'), social: catStyle('social'),
+  travel: catStyle('travel'), free: catStyle('free'), health: catStyle('health'),
+  assistant: { bg: 'color-mix(in srgb, var(--accent-primary) 20%, var(--surface))', bd: 'color-mix(in srgb, var(--accent-primary) 55%, transparent)', tx: 'var(--accent-hover)', tg: 'color-mix(in srgb, var(--accent-primary) 30%, transparent)', sw: 'var(--accent-primary)' },
+};
+
+/* Emoji is derived from category the same way color is (see catStyle/C
+   above), falling back to the shared TYPE_EMOJI map (now defined once in
+   supabase-client.js, not re-declared per page) if an event's own row
+   has none — rowToEvent() already fills this in server-side, but this
+   stays as a defensive fallback. */
+function emojiFor(ev) { return ev.emoji || TYPE_EMOJI[ev.type] || '✦'; }
+
+/* ─── Helpers ──────────────────────────────────────────────────── */
+const toMin = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+const timeRange = (s, e) => {
+  const sm = toMin(s), em = toMin(e);
+  const fmt = m => { const h=Math.floor(m/60)%12||12, mn=m%60; return mn ? (h + ':' + String(mn).padStart(2,'0')) : String(h); };
+  const sAP = sm<720?'am':'pm', eAP = em<720?'am':'pm';
+  return sAP===eAP ? (fmt(sm) + '–' + fmt(em) + ' ' + eAP) : (fmt(sm) + ' ' + sAP + '–' + fmt(em) + ' ' + eAP);
+};
+function addDays(dateKey, n) {
+  const d = new Date(dateKey + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/* Today's real calendar date, e.g. '2026-08-02' — not a fixed fictional
+   date, so this page's "right now" logic always matches the actual day. */
+function todayKey() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+const TODAY_KEY = todayKey();
+
+const ASSISTANT_EVENT = { id: 'assistant', type: 'assistant', emoji: '✦', title: 'From Assistant', sub: null, start: null, end: null, tag: 'Assistant' };
+
+/* Every task now carries its own eventId + checked column in Postgres
+   (see sql/schema.sql) instead of living in two separate localStorage
+   buckets (a hardcoded TASKS dict — always empty in this app — and a
+   flat cal_action_bot_tasks list). This just filters the already-loaded
+   `tasks` state down to one event's rows; a null eventId groups under
+   the synthetic ASSISTANT_EVENT card, same as before. Every task here
+   is user-authored (via the bot or the manual EventModal), so fromBot
+   stays true for all of them — matching the original app's behavior,
+   since its hardcoded TASKS dict was always empty. */
+function tasksFor(eventId, tasks) {
+  return tasks
+    .filter(t => (t.eventId === null ? ASSISTANT_EVENT.id : t.eventId) === eventId)
+    .map(t => ({ key: t.id, text: t.text, fromBot: true }));
+}
+
+/* Finds what's happening right now, or what's next if nothing is active. */
+function findHero(events) {
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const activeIdx = events.findIndex(e => nowMin >= toMin(e.start) && nowMin < toMin(e.end));
+  if (activeIdx !== -1) return { index: activeIdx, mode: 'now' };
+  const nextIdx = events.findIndex(e => toMin(e.start) > nowMin);
+  if (nextIdx !== -1) return { index: nextIdx, mode: 'next' };
+  return { index: -1, mode: 'done' };
+}
+
+/* ─── Which specific event (if any) we were sent here to focus on —
+   set by index.html/calendar.html when the user taps an event directly.
+   Parsed at module level per the URLSearchParams-inside-React rule. ── */
+const _evParam = (function() { try { return new URLSearchParams(window.location.search).get('event'); } catch(e) { return null; } })();
+const _dateParam = (function() { try { return new URLSearchParams(window.location.search).get('date'); } catch(e) { return null; } })();
+const _focusedDateLabel = new Date((_dateParam || TODAY_KEY) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+/* ─── Checkbox ───────────────────────────────────────────────── */
+function Check({ done, c, onToggle, big }) {
+  const size = big ? 22 : 18;
+  return (
+    <div
+      onClick={onToggle}
+      style={{
+        width: size, height: size, borderRadius: big ? 7 : 6, flexShrink: 0,
+        border: '1.5px solid ' + (done ? c.sw : c.bd),
+        background: done ? c.sw : 'color-mix(in srgb, var(--surface) 60%, transparent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', transition: 'all 0.15s ease',
+      }}
+    >
+      {done && (
+        <svg width={big ? 13 : 11} height={big ? 13 : 11} viewBox="0 0 16 16" fill="none">
+          <path d="M3 8.5L6.2 11.7L13 4.5" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </div>
+  );
+}
+
+/* ─── Checklist row (shared by hero + accordion + focused-event cards) ── */
+function TaskRow({ task, c, checked, onToggleTask, onDeleteTask, big }) {
+  const done = !!checked[task.key];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: big ? 12 : 10 }}>
+      <Check done={done} c={c} onToggle={() => onToggleTask(task.key)} big={big} />
+      <span style={{
+        flex: 1, minWidth: 0,
+        fontSize: big ? 14.5 : 13, color: c.tx,
+        textDecoration: done ? 'line-through' : 'none',
+        opacity: done ? 0.5 : 0.9,
+        lineHeight: 1.4,
+      }}>{task.text}</span>
+      {task.fromBot && (
+        <span title="Added by the assistant" style={{
+          fontSize: 9.5, fontWeight: 600, color: c.tx, opacity: 0.55,
+          flexShrink: 0, letterSpacing: '0.3px',
+        }}>✦ BOT</span>
+      )}
+      {task.fromBot && (
+        <span
+          onClick={() => onDeleteTask(task.key)}
+          title="Remove"
+          style={{ fontSize: 13, color: c.tx, opacity: 0.4, cursor: 'pointer', flexShrink: 0, padding: '0 2px', lineHeight: 1 }}
+        >×</span>
+      )}
+    </div>
+  );
+}
+
+/* ─── Info row (date / time / location) ─────────────────────────── */
+function InfoRow({ icon, label, value }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+      <span style={{ fontSize: 15, width: 20, flexShrink: 0, textAlign: 'center' }}>{icon}</span>
+      <div>
+        <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</div>
+        <div style={{ fontSize: 13.5, color: 'var(--text-primary)', marginTop: 1 }}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Focused event — reached by tapping a specific event on
+   index.html/calendar.html (?event=<id>&date=<YYYY-MM-DD>). Shows that
+   one event's info + its own checklist, regardless of what day it's
+   on or whether it's today's hero. ── */
+function FocusedEvent({ ev, tasks, checked, onToggleTask, onDeleteTask, backHref }) {
+  const c = C[ev.type] || C.work;
+  const doneCount = tasks.filter(t => checked[t.key]).length;
+  return (
+    <div>
+      <a href={backHref} style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        fontSize: 13, fontWeight: 600, color: 'var(--accent-hover)',
+        textDecoration: 'none', marginBottom: 16,
+      }}>← Back to schedule</a>
+
+      <div style={{
+        background: c.bg,
+        border: '2px solid ' + c.bd,
+        borderRadius: 26,
+        padding: '22px 24px 24px',
+        backdropFilter: 'blur(14px)',
+        boxShadow: '0 10px 32px color-mix(in srgb, ' + c.sw + ' 22%, transparent)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+          <span style={{ fontSize: 30, lineHeight: 1, flexShrink: 0 }}>{emojiFor(ev)}</span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 21, fontWeight: 700, color: c.tx, lineHeight: 1.25 }}>{ev.title}</div>
+            <span style={{
+              display: 'inline-block', marginTop: 5,
+              padding: '2px 9px', borderRadius: 20, fontSize: 10.5, fontWeight: 500,
+              background: c.tg, color: c.tx,
+            }}>{ev.tag}</span>
+          </div>
+          {tasks.length > 0 && (
+            <div style={{
+              fontSize: 12, fontWeight: 600, color: c.tx,
+              background: 'color-mix(in srgb, var(--surface) 55%, transparent)', borderRadius: 20,
+              padding: '4px 11px', flexShrink: 0,
+            }}>{doneCount}/{tasks.length}</div>
+          )}
+        </div>
+
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 14,
+          background: 'color-mix(in srgb, var(--surface) 55%, transparent)',
+          borderRadius: 16, padding: '14px 16px', marginBottom: 20,
+        }}>
+          <InfoRow icon="📅" label="Date" value={_focusedDateLabel} />
+          {ev.start && <InfoRow icon="🕐" label="Time" value={timeRange(ev.start, ev.end)} />}
+          {ev.sub && <InfoRow icon="📍" label="Details" value={ev.sub} />}
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 600, color: c.tx, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 10 }}>
+          Action items
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingLeft: 2 }}>
+          {tasks.length === 0 ? (
+            <div style={{ fontSize: 13, color: c.tx, opacity: 0.55 }}>No action items for this one.</div>
+          ) : tasks.map(task => (
+            <TaskRow key={task.key} task={task} c={c} checked={checked} onToggleTask={onToggleTask} onDeleteTask={onDeleteTask} big />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Hero card — the current (or next-up) activity, always expanded ── */
+function Hero({ ev, mode, tasks, checked, onToggleTask, onDeleteTask }) {
+  if (!ev) {
+    return (
+      <div style={{
+        background: 'var(--surface-elevated)', border: '1px solid var(--border)',
+        borderRadius: 24, padding: '32px 26px', textAlign: 'center',
+        backdropFilter: 'blur(14px)',
+      }}>
+        <div style={{ fontSize: 26, marginBottom: 8 }}>✦</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>Nothing on the books today</div>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
+          Ask the <a href="bot.html" style={{ color: 'var(--accent-hover)', fontWeight: 600 }}>assistant</a> to help you plan something.
+        </div>
+      </div>
+    );
+  }
+
+  const c = C[ev.type] || C.work;
+  const doneCount = tasks.filter(t => checked[t.key]).length;
+
+  return (
+    <div style={{
+      background: c.bg,
+      border: '2px solid ' + c.bd,
+      borderRadius: 26,
+      padding: '22px 24px 24px',
+      backdropFilter: 'blur(14px)',
+      boxShadow: '0 10px 32px color-mix(in srgb, ' + c.sw + ' 22%, transparent)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+        <span style={{ fontSize: 30, lineHeight: 1, flexShrink: 0 }}>{emojiFor(ev)}</span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{
+              padding: '2.5px 10px', borderRadius: 20, fontSize: 10.5, fontWeight: 700,
+              letterSpacing: '0.5px', textTransform: 'uppercase',
+              background: mode === 'now' ? c.sw : c.tg, color: mode === 'now' ? 'var(--surface)' : c.tx,
+            }}>{mode === 'now' ? 'Now' : 'Next Up'}</span>
+            <span style={{ fontSize: 11.5, color: c.tx, opacity: 0.65, fontWeight: 500 }}>{timeRange(ev.start, ev.end)}</span>
+          </div>
+          <div style={{ fontSize: 21, fontWeight: 700, color: c.tx, marginTop: 6, lineHeight: 1.2 }}>{ev.title}</div>
+          {ev.sub && <div style={{ fontSize: 13, color: c.tx, opacity: 0.7, marginTop: 3 }}>{ev.sub}</div>}
+        </div>
+        {tasks.length > 0 && (
+          <div style={{
+            fontSize: 12, fontWeight: 600, color: c.tx,
+            background: 'color-mix(in srgb, var(--surface) 55%, transparent)', borderRadius: 20,
+            padding: '4px 11px', flexShrink: 0,
+          }}>{doneCount}/{tasks.length}</div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingLeft: 2 }}>
+        {tasks.length === 0 ? (
+          <div style={{ fontSize: 13, color: c.tx, opacity: 0.55 }}>No action items for this one.</div>
+        ) : tasks.map(task => (
+          <TaskRow key={task.key} task={task} c={c} checked={checked} onToggleTask={onToggleTask} onDeleteTask={onDeleteTask} big />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Activity card (accordion) — used for "Later Today" items ─────── */
+function Activity({ ev, tasks, checked, onToggleTask, onDeleteTask, open, onToggleOpen }) {
+  const c = C[ev.type] || C.work;
+  const doneCount = tasks.filter(t => checked[t.key]).length;
+  const allDone = doneCount === tasks.length && tasks.length > 0;
+
+  return (
+    <div style={{
+      background: c.bg,
+      border: '1.5px solid ' + c.bd,
+      borderRadius: 18,
+      overflow: 'hidden',
+      backdropFilter: 'blur(10px)',
+      transition: 'box-shadow 0.16s ease',
+      boxShadow: open ? '0 6px 22px color-mix(in srgb, var(--text-primary) 12%, transparent)' : '0 2px 10px color-mix(in srgb, var(--text-primary) 6%, transparent)',
+    }}>
+      <div
+        onClick={onToggleOpen}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', cursor: 'pointer', userSelect: 'none' }}
+      >
+        <span style={{ fontSize: 17, flexShrink: 0, lineHeight: 1 }}>{emojiFor(ev)}</span>
+
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              fontSize: 14, fontWeight: 600, color: c.tx, lineHeight: 1.25,
+              textDecoration: allDone ? 'line-through' : 'none',
+              opacity: allDone ? 0.6 : 1,
+            }}>{ev.title}</span>
+            <span style={{ padding: '2px 9px', borderRadius: 20, fontSize: 10.5, fontWeight: 500, background: c.tg, color: c.tx, flexShrink: 0 }}>{ev.tag}</span>
+          </div>
+          {ev.start && (
+            <div style={{ fontSize: 11.5, color: c.tx, opacity: 0.6, marginTop: 2 }}>{timeRange(ev.start, ev.end)}</div>
+          )}
+        </div>
+
+        {tasks.length > 0 && (
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: c.tx, background: 'color-mix(in srgb, var(--surface) 50%, transparent)', borderRadius: 20, padding: '3px 10px', flexShrink: 0 }}>{doneCount}/{tasks.length}</div>
+        )}
+
+        <span style={{ fontSize: 12, color: c.tx, opacity: 0.55, flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.16s ease' }}>▾</span>
+      </div>
+
+      {open && (
+        <div style={{ padding: '2px 16px 16px 46px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {tasks.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: c.tx, opacity: 0.55 }}>No action items for this one.</div>
+          ) : tasks.map(task => (
+            <TaskRow key={task.key} task={task} c={c} checked={checked} onToggleTask={onToggleTask} onDeleteTask={onDeleteTask} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Later This Week — day-by-day modal. `events` is a live-computed
+   map of the next 7 real dates → that day's bot events (built in App(),
+   see weekEventsMerged), not fixed sample data. ── */
+function WeekModal({ events, onClose }) {
+  const dates = Object.keys(events).sort();
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'color-mix(in srgb, var(--text-primary) 35%, transparent)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        backdropFilter: 'blur(4px)',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 660,
+          background: 'var(--surface)', borderRadius: '24px 24px 0 0',
+          padding: '20px 22px 32px', maxHeight: '80vh', overflowY: 'auto',
+          boxShadow: '0 -8px 32px color-mix(in srgb, var(--text-primary) 20%, transparent)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>The next 7 days</div>
+          <span onClick={onClose} style={{ fontSize: 20, color: 'var(--text-secondary)', cursor: 'pointer', padding: 4, lineHeight: 1 }}>×</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {dates.map(dateKey => {
+            const evs = events[dateKey];
+            const d = new Date(dateKey + 'T12:00:00');
+            const isFocusDay = dateKey === TODAY_KEY;
+            const label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            return (
+              <a key={dateKey} href={'index.html?date=' + dateKey} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '11px 14px', borderRadius: 14, textDecoration: 'none',
+                background: isFocusDay ? 'color-mix(in srgb, var(--accent-primary) 14%, transparent)' : 'var(--surface-elevated)',
+                border: '1px solid ' + (isFocusDay ? 'color-mix(in srgb, var(--accent-primary) 30%, transparent)' : 'var(--border)'),
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', width: 92, flexShrink: 0 }}>{label}</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
+                  {evs.length === 0 ? (
+                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>Nothing planned</span>
+                  ) : evs.map((ev, i) => {
+                    const c = C[ev.type] || C.work;
+                    return (
+                      <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: 'var(--text-secondary)' }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: c.sw, flexShrink: 0 }} />
+                        {ev.title}
+                      </span>
+                    );
+                  })}
+                </div>
+              </a>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Loading screen — shown while the auth check and the initial
+   Supabase fetch are in flight. ── */
+function LoadingScreen() {
+  return (
+    <div style={{ maxWidth: 660, margin: '0 auto', padding: '80px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+      Loading your day…
+    </div>
+  );
+}
+
+/* ─── App ──────────────────────────────────────────────────────── */
+function App() {
+  const [events, setEvents] = useState(null);   // null = still loading
+  const [tasks, setTasks] = useState([]);
+  const [ready, setReady] = useState(false);
+  const [openIds, setOpenIds] = useState({});
+  const [laterOpen, setLaterOpen] = useState(false);
+  const [weekOpen, setWeekOpen] = useState(false);
+
+  async function refresh() {
+    const [ev, tk] = await Promise.all([Cal.loadEvents(), Cal.loadTasks()]);
+    setEvents(ev);
+    setTasks(tk);
+  }
+
+  useEffect(() => {
+    (async () => {
+      const session = await Cal.requireSession();
+      if (!session) return; // Cal.requireSession already redirected to login.html
+      await refresh();
+      setReady(true);
+    })();
+  }, []);
+
+  // `checked` is derived straight from each task's own row instead of a
+  // separate flat localStorage map keyed by a positional id — see
+  // sql/schema.sql for why that structurally fixes the stale-checked-state
+  // bug the pre-migration version had. Keeping the same `{ key: bool }`
+  // shape here means TaskRow/Hero/Activity/FocusedEvent below need zero
+  // changes — they just keep doing `checked[task.key]`.
+  const checked = useMemo(() => {
+    const c = {};
+    tasks.forEach(t => { c[t.id] = t.checked; });
+    return c;
+  }, [tasks]);
+
+  async function toggleTask(key) {
+    const t = tasks.find(x => x.id === key);
+    if (!t) return;
+    // Optimistic local update so the checkbox responds instantly, then
+    // reconcile with the server in the background.
+    setTasks(prev => prev.map(x => x.id === key ? { ...x, checked: !x.checked } : x));
+    await Cal.setTaskChecked(key, !t.checked);
+  }
+  const toggleOpen = id => setOpenIds(prev => ({ ...prev, [id]: !prev[id] }));
+  async function deleteTask(key) {
+    setTasks(prev => prev.filter(t => t.id !== key));
+    await Cal.deleteTask(key);
+  }
+
+  // Deep link from index.html/calendar.html: focus one specific event
+  // regardless of its date, instead of the default "today" Hero view.
+  const focusedEv = _evParam
+    ? ((events || []).find(e => String(e.id) === _evParam) || null)
+    : null;
+
+  const { allEvents, heroMode, heroEvent, laterEvents } = useMemo(() => {
+    const todaysEvents = (events || []).filter(e => (e.date || TODAY_KEY) === TODAY_KEY);
+    const allEvents = todaysEvents.slice().sort((a, b) => toMin(a.start) - toMin(b.start));
+    const { index: heroIndex, mode: heroMode } = findHero(allEvents);
+    const heroEvent = heroIndex !== -1 ? allEvents[heroIndex] : null;
+    const laterEvents = heroIndex !== -1 ? allEvents.slice(heroIndex + 1) : [];
+    return { allEvents, heroMode, heroEvent, laterEvents };
+  }, [events]);
+
+  const weekEventsMerged = useMemo(() => {
+    const merged = {};
+    Array.from({ length: 7 }, (_, i) => addDays(TODAY_KEY, i)).forEach(k => { merged[k] = []; });
+    (events || []).forEach(e => {
+      const k = e.date || TODAY_KEY;
+      if (merged[k]) merged[k] = merged[k].concat([{ type: e.type, title: e.title }]);
+    });
+    return merged;
+  }, [events]);
+
+  const unlinkedTasks = tasks.filter(t => t.eventId === null);
+  const laterCards = unlinkedTasks.length ? laterEvents.concat([ASSISTANT_EVENT]) : laterEvents;
+
+  const allEventIds = allEvents.map(e => e.id).concat(unlinkedTasks.length ? [ASSISTANT_EVENT.id] : []);
+  const totalTasks = allEventIds.reduce((a, id) => a + tasksFor(id, tasks).length, 0);
+  const doneTasks = Object.values(checked).filter(Boolean).length;
+
+  if (!ready) return <LoadingScreen />;
+
+  return (
+    <div style={{ maxWidth: 660, margin: '0 auto', padding: '40px 24px 80px' }}>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
+        {focusedEv ? (
+          <div>
+            <h1 style={{ fontSize: 27, fontWeight: 700, letterSpacing: '-0.5px', lineHeight: 1.2, color: 'var(--text-primary)' }}>
+              Event{' '}
+              <span style={{
+                background: 'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              }}>details.</span>
+            </h1>
+            <p style={{ marginTop: 7, fontSize: 14, color: 'var(--text-secondary)', fontWeight: 400, lineHeight: 1.5 }}>
+              Everything for this one, in one place. ✦
+            </p>
+          </div>
+        ) : (
+          <div>
+            <h1 style={{ fontSize: 27, fontWeight: 700, letterSpacing: '-0.5px', lineHeight: 1.2, color: 'var(--text-primary)' }}>
+              Right{' '}
+              <span style={{
+                background: 'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              }}>now.</span>
+            </h1>
+            <p style={{ marginTop: 7, fontSize: 14, color: 'var(--text-secondary)', fontWeight: 400, lineHeight: 1.5 }}>
+              Your current focus — plus what's still ahead. ✦
+            </p>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              marginTop: 13, background: 'var(--surface-elevated)',
+              border: '1px solid var(--border)', borderRadius: 20,
+              padding: '5px 14px', fontSize: 12.5, color: 'var(--text-secondary)',
+              backdropFilter: 'blur(10px)',
+            }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-primary)' }} />
+              {doneTasks} of {totalTasks} done
+            </div>
+          </div>
+        )}
+        <SettingsGear />
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <Nav page="action" />
+      </div>
+
+      {focusedEv ? (
+        <FocusedEvent
+          ev={focusedEv}
+          tasks={tasksFor(focusedEv.id, tasks)}
+          checked={checked}
+          onToggleTask={toggleTask}
+          onDeleteTask={deleteTask}
+          backHref={'index.html?date=' + (_dateParam || TODAY_KEY)}
+        />
+      ) : (
+        <>
+          {/* ── Hero: current / next-up activity ── */}
+          <Hero
+            ev={heroEvent}
+            mode={heroMode}
+            tasks={heroEvent ? tasksFor(heroEvent.id, tasks) : []}
+            checked={checked}
+            onToggleTask={toggleTask}
+            onDeleteTask={deleteTask}
+          />
+
+          {/* ── Later Today / Later This Week — always available, regardless
+               of whether there's a current hero event or anything left today ── */}
+          <div style={{ marginTop: 16 }}>
+            <button
+              onClick={() => setLaterOpen(o => !o)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '13px 18px', borderRadius: 18, cursor: 'pointer',
+                background: 'var(--surface-elevated)', border: '1px solid var(--border)',
+                fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)',
+                fontFamily: 'inherit', backdropFilter: 'blur(10px)',
+              }}
+            >
+              <span>Later Today</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', transform: laterOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.16s ease' }}>▾</span>
+            </button>
+
+            {laterOpen && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+                {laterCards.length === 0 ? (
+                  <div style={{
+                    padding: '16px 18px', borderRadius: 16,
+                    background: 'var(--surface-elevated)', border: '1px solid var(--border)',
+                    fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center',
+                  }}>Nothing else on the books for today.</div>
+                ) : laterCards.map(ev => (
+                  <Activity
+                    key={ev.id}
+                    ev={ev}
+                    tasks={tasksFor(ev.id, tasks)}
+                    checked={checked}
+                    onToggleTask={toggleTask}
+                    onDeleteTask={deleteTask}
+                    open={!!openIds[ev.id]}
+                    onToggleOpen={() => toggleOpen(ev.id)}
+                  />
+                ))}
+
+                <button
+                  onClick={() => setWeekOpen(true)}
+                  style={{
+                    marginTop: 4, padding: '11px 18px', borderRadius: 16, cursor: 'pointer',
+                    background: 'color-mix(in srgb, var(--accent-primary) 14%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--accent-primary) 30%, transparent)',
+                    fontSize: 13, fontWeight: 600, color: 'var(--accent-hover)',
+                    fontFamily: 'inherit',
+                  }}
+                >Later This Week →</button>
+              </div>
+            )}
+          </div>
+
+          {weekOpen && <WeekModal events={weekEventsMerged} onClose={() => setWeekOpen(false)} />}
+        </>
+      )}
+
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
