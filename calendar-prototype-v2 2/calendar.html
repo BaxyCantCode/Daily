@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Calendar — Month</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="supabase-client.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Theme tokens — "Yin" (light) / "Yang" (dark) ────────────── */
+    :root {
+      --bg-primary: #F6FAFD;
+      --bg-gradient: linear-gradient(135deg, #EFF6FC 0%, #DDEBF7 100%);
+      --surface: #FFFFFF;
+      --surface-elevated: rgba(255, 255, 255, 0.7);
+      --border: rgba(120, 175, 224, 0.25);
+      --text-primary: #22283A;
+      --text-secondary: #5C6B80;
+      --text-muted: #93A2B8;
+      --accent-primary: #5AAEE8;
+      --accent-secondary: #A8D4F2;
+      --accent-hover: #3E93D6;
+      --cat-work: #3F9E8F;
+      --cat-personal: #E0A8C9;
+      --cat-social: #F0C078;
+      --cat-travel: #8FD0B8;
+      --cat-free: #C4C0D8;
+      --cat-health: #E08F8F;
+    }
+    [data-theme="dark"] {
+      --bg-primary: #1C1D21;
+      --bg-gradient: linear-gradient(135deg, #1C1D21 0%, #14151A 100%);
+      --surface: #24252B;
+      --surface-elevated: rgba(30, 33, 42, 0.7);
+      --border: rgba(212, 175, 55, 0.15);
+      --text-primary: #ECEAF2;
+      --text-secondary: #A8A6B5;
+      --text-muted: #6E6C7A;
+      --accent-primary: #D4AF37;
+      --accent-secondary: #1B2A4A;
+      --accent-hover: #E8C158;
+      --cat-work: #2E8A78;
+      --cat-personal: #B0729A;
+      --cat-social: #D4AF37;
+      --cat-travel: #4A9B82;
+      --cat-free: #5A5870;
+      --cat-health: #B0605F;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.25s ease, color 0.25s ease;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent-primary) 35%, transparent); border-radius: 4px; }
+  </style>
+</head>
+<body>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('cal_theme');
+      if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
+  })();
+</script>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+/* ─── Color palette (same as daily schedule) ──────────────────── */
+function catStyle(name) {
+  const v = 'var(--cat-' + name + ')';
+  return {
+    bg: 'color-mix(in srgb, ' + v + ' 20%, var(--surface))',
+    bd: 'color-mix(in srgb, ' + v + ' 55%, transparent)',
+    tx: 'color-mix(in srgb, ' + v + ' 68%, var(--text-primary))',
+    dot: v,
+  };
+}
+const C = {
+  work: catStyle('work'), personal: catStyle('personal'), social: catStyle('social'),
+  travel: catStyle('travel'), free: catStyle('free'), health: catStyle('health'),
+};
+
+/* Today's real calendar date, e.g. '2026-08-02' — not a fixed fictional
+   date, so bot-scheduled events (and this month's own default view,
+   see App() below) always line up with whatever day it actually is. */
+function todayKey() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+const TODAY_KEY = todayKey();
+const toMin = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+/* Compact time label for the tiny day-cell rows, e.g. "9a" / "9:30a" / "2p". */
+function fmtDot(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  const hr12 = h % 12 || 12;
+  const ap = h >= 12 ? 'p' : 'a';
+  return m ? hr12 + ':' + String(m).padStart(2, '0') + ap : hr12 + ap;
+}
+
+/* ─── Manual event create/edit — now goes through Cal.* (supabase-client.js)
+   instead of localStorage — see that file for saveManualEvent/loadEvents/
+   loadTasks/etc. CATEGORIES/TYPE_EMOJI are defined there too now. ── */
+
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function getDaysInMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+function getFirstDayOfMonth(year, month) {
+  return new Date(year, month, 1).getDay();
+}
+function toKey(year, month, day) {
+  return `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+}
+
+/* ─── Nav bar ──────────────────────────────────────────────────── */
+function Nav({ page }) {
+  const pages = [
+    { label: 'Today', href: 'index.html', key: 'today' },
+    { label: 'Calendar', href: 'calendar.html', key: 'calendar' },
+    { label: 'Action', href: 'action.html', key: 'action' },
+    { label: '✦ Bot', href: 'bot.html', key: 'bot' },
+  ];
+  return (
+    <div style={{
+      display: 'flex', gap: 4, alignItems: 'center',
+      background: 'var(--surface-elevated)',
+      border: '1px solid var(--border)',
+      borderRadius: 24, padding: '5px 6px',
+      backdropFilter: 'blur(12px)',
+    }}>
+      {pages.map(p => (
+        <a key={p.key} href={p.href} style={{
+          padding: '6px 16px', borderRadius: 20,
+          fontSize: 13, fontWeight: 500,
+          textDecoration: 'none',
+          background: p.key === page ? 'color-mix(in srgb, var(--accent-primary) 18%, transparent)' : 'transparent',
+          color: p.key === page ? 'var(--accent-hover)' : 'var(--text-secondary)',
+          border: p.key === page ? '1px solid color-mix(in srgb, var(--accent-primary) 28%, transparent)' : '1px solid transparent',
+          transition: 'all 0.15s ease',
+        }}>{p.label}</a>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Settings gear ──────────────────────────────────────────────── */
+function SettingsGear() {
+  return (
+    <a href="settings.html" title="Settings" style={{
+      width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--surface-elevated)',
+      border: '2px solid var(--border)',
+      color: 'var(--text-secondary)', fontSize: 26, fontWeight: 600,
+      textDecoration: 'none',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 2px 10px color-mix(in srgb, var(--text-primary) 8%, transparent)',
+    }}><span style={{ display: 'inline-block', transform: 'translateY(-2px)' }}>⚙</span></a>
+  );
+}
+
+/* ─── Add-event button ─────────────────────────────────────────── */
+function AddEventButton({ onClick }) {
+  return (
+    <button onClick={onClick} title="Add event" style={{
+      width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-hover))',
+      border: 'none', color: 'white', fontSize: 21, fontWeight: 600,
+      cursor: 'pointer', fontFamily: 'inherit', lineHeight: 1,
+      boxShadow: '0 3px 12px color-mix(in srgb, var(--accent-primary) 38%, transparent)',
+    }}><span style={{ display: 'inline-block', transform: 'translateY(-1.5px)' }}>+</span></button>
+  );
+}
+
+/* ─── Add/edit event modal — shared shape with index.html's copy. Create
+   mode when `event` is null (pre-filled only with `defaultDate`), edit
+   mode when an existing event object is passed in. ── */
+function EventModal({ event, defaultDate, initialTasksText, onClose, onSaved }) {
+  const isEdit = !!event;
+  const [title, setTitle] = useState(event ? event.title : '');
+  const [date, setDate] = useState(event ? event.date : defaultDate);
+  const [start, setStart] = useState(event ? event.start : '09:00');
+  const [end, setEnd] = useState(event ? event.end : '10:00');
+  const [type, setType] = useState(event ? event.type : 'work');
+  const [sub, setSub] = useState(event && event.sub ? event.sub : '');
+  // Tasks for an existing event are handed down from App's already-loaded
+  // `tasks` state (see openEdit below) rather than fetched here — Cal.*
+  // calls are async, so a synchronous useState initializer can't await one.
+  const [tasksText, setTasksText] = useState(initialTasksText || '');
+  const [saving, setSaving] = useState(false);
+
+  const valid = title.trim().length > 0 && date && start && end && start < end;
+
+  async function handleSave() {
+    if (!valid || saving) return;
+    setSaving(true);
+    const tasks = tasksText.split('\n').map(t => t.trim()).filter(Boolean);
+    const saved = await Cal.saveManualEvent({ title, date, start, end, type, sub, tasks }, isEdit ? event.id : null);
+    onSaved(saved);
+  }
+
+  const inputStyle = {
+    width: '100%', padding: '9px 12px', borderRadius: 10,
+    border: '1px solid var(--border)', background: 'var(--surface)',
+    color: 'var(--text-primary)', fontSize: 13.5, fontFamily: 'inherit', outline: 'none',
+  };
+  const labelStyle = {
+    fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
+    textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 5, display: 'block',
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'color-mix(in srgb, var(--text-primary) 35%, transparent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        backdropFilter: 'blur(4px)', padding: 20,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 420, background: 'var(--surface)',
+          borderRadius: 24, padding: '22px 22px 24px', maxHeight: '86vh', overflowY: 'auto',
+          boxShadow: '0 12px 40px color-mix(in srgb, var(--text-primary) 25%, transparent)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>{isEdit ? 'Edit event' : 'New event'}</div>
+          <span onClick={onClose} style={{ fontSize: 20, color: 'var(--text-secondary)', cursor: 'pointer', padding: 4, lineHeight: 1 }}>×</span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={labelStyle}>Title</label>
+            <input style={inputStyle} value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Dentist appointment" />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Date</label>
+            <input type="date" style={inputStyle} value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Start</label>
+              <input type="time" style={inputStyle} value={start} onChange={e => setStart(e.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>End</label>
+              <input type="time" style={inputStyle} value={end} onChange={e => setEnd(e.target.value)} />
+            </div>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Category</label>
+            <select style={inputStyle} value={type} onChange={e => setType(e.target.value)}>
+              {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Notes (optional)</label>
+            <input style={inputStyle} value={sub} onChange={e => setSub(e.target.value)} placeholder="Location, details..." />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Action items (optional, one per line)</label>
+            <textarea
+              style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }}
+              value={tasksText}
+              onChange={e => setTasksText(e.target.value)}
+              placeholder={'Pack bag\nBring insurance card'}
+            />
+          </div>
+
+          {start && end && start >= end && (
+            <div style={{ fontSize: 12, color: 'var(--cat-health)', fontWeight: 500 }}>End time must be after start time.</div>
+          )}
+
+          <button
+            onClick={handleSave}
+            disabled={!valid || saving}
+            style={{
+              marginTop: 4, padding: '11px 18px', borderRadius: 14,
+              border: 'none', cursor: (valid && !saving) ? 'pointer' : 'not-allowed',
+              background: (valid && !saving) ? 'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))' : 'var(--border)',
+              color: (valid && !saving) ? 'white' : 'var(--text-muted)',
+              fontSize: 14, fontWeight: 600, fontFamily: 'inherit',
+            }}
+          >{saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Add event')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Day cell ─────────────────────────────────────────────────── */
+function DayCell({ day, month, year, isToday, events, onEdit }) {
+  const [hoverIdx, setHoverIdx] = useState(null);
+  const key = toKey(year, month, day);
+  const dayEvents = events[key] || [];
+  const MAX_DOTS = 4;
+  const shownDots = dayEvents.slice(0, MAX_DOTS);
+  const overflow = dayEvents.length - MAX_DOTS;
+
+  return (
+    <div
+      onClick={() => { window.location.href = 'index.html?date=' + toKey(year, month, day); }}
+      style={{
+        minHeight: 82,
+        padding: '8px 9px 6px',
+        borderRadius: 12,
+        background: isToday
+          ? 'color-mix(in srgb, var(--accent-primary) 16%, transparent)'
+          : 'color-mix(in srgb, var(--surface) 38%, transparent)',
+        border: isToday
+          ? '1.5px solid color-mix(in srgb, var(--accent-primary) 40%, transparent)'
+          : '1px solid var(--border)',
+        cursor: 'pointer',
+        transition: 'all 0.14s ease',
+        position: 'relative',
+      }}
+    >
+      {/* Day number */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 5,
+      }}>
+        <span style={{
+          fontSize: 13,
+          fontWeight: isToday ? 700 : 400,
+          color: isToday ? 'var(--accent-hover)' : 'var(--text-secondary)',
+          width: 24, height: 24,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: '50%',
+          background: isToday ? 'color-mix(in srgb, var(--accent-primary) 22%, transparent)' : 'transparent',
+        }}>{day}</span>
+        {overflow > 0 && (
+          <span style={{ fontSize: 9.5, color: 'var(--text-muted)', fontWeight: 500 }}>+{overflow}</span>
+        )}
+      </div>
+
+      {/* Event dots / mini labels */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+        {shownDots.map((ev, i) => (
+          <div
+            key={i}
+            onMouseEnter={() => setHoverIdx(i)}
+            onMouseLeave={() => setHoverIdx(null)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <div style={{
+              width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+              background: C[ev.type]?.dot || '#c4b5fd',
+            }} />
+            {ev.start && (
+              <span style={{
+                fontSize: 9, color: 'var(--text-muted)', fontWeight: 500,
+                flexShrink: 0, letterSpacing: '0.1px',
+              }}>{fmtDot(ev.start)}</span>
+            )}
+            <span style={{
+              fontSize: 10.5, color: 'var(--text-secondary)', fontWeight: 400,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              maxWidth: '100%', flex: 1,
+            }}>{ev.title}</span>
+            {ev.id && hoverIdx === i && (
+              <span
+                onClick={e => { e.stopPropagation(); onEdit(ev); }}
+                title="Edit event"
+                style={{ fontSize: 9, color: 'var(--accent-hover)', flexShrink: 0, cursor: 'pointer', lineHeight: 1 }}
+              >✎</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Month legend ─────────────────────────────────────────────── */
+function Legend() {
+  return (
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
+      {Object.entries(C).map(([type, c]) => (
+        <div key={type} style={{
+          display: 'flex', alignItems: 'center', gap: 5,
+          background: 'var(--surface-elevated)',
+          border: '1px solid var(--border)',
+          borderRadius: 20, padding: '4px 11px',
+          fontSize: 11.5, color: 'var(--text-secondary)',
+          backdropFilter: 'blur(8px)',
+        }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: c.dot }} />
+          {type.charAt(0).toUpperCase() + type.slice(1)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Loading screen — shown while the auth check and the initial
+   Supabase fetch are in flight. Previously all of this was computed
+   synchronously from localStorage before the first render even happened;
+   a network round-trip means there's now a real (if brief) gap to cover. ── */
+function LoadingScreen() {
+  return (
+    <div style={{ maxWidth:720, margin:'0 auto', padding:'80px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+      Loading your calendar…
+    </div>
+  );
+}
+
+/* ─── App ──────────────────────────────────────────────────────── */
+function App() {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [modalEvent, setModalEvent] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [events, setEvents] = useState(null);   // null = still loading
+  const [tasks, setTasks] = useState([]);
+  const [ready, setReady] = useState(false);
+
+  async function refresh() {
+    const [ev, tk] = await Promise.all([Cal.loadEvents(), Cal.loadTasks()]);
+    setEvents(ev);
+    setTasks(tk);
+  }
+
+  useEffect(() => {
+    (async () => {
+      const session = await Cal.requireSession();
+      if (!session) return; // Cal.requireSession already redirected to login.html
+      await refresh();
+      setReady(true);
+    })();
+  }, []);
+
+  // Everything that used to be computed once at module load (before this
+  // page had any async data source) now depends on the `events` state
+  // loaded above, so it's recomputed here instead. Mirrors the exact same
+  // bucket-by-date + chronological-sort logic the original localStorage
+  // version did.
+  const EVENTS_BY_DATE_MERGED = React.useMemo(() => {
+    const merged = {};
+    (events || []).forEach(e => {
+      const key = e.date || TODAY_KEY;
+      merged[key] = (merged[key] || []).concat([{
+        id: e.id, type: e.type, title: e.title, start: e.start, end: e.end,
+        sub: e.sub, tag: e.tag, emoji: e.emoji, source: e.source, date: key,
+      }]);
+    });
+    Object.keys(merged).forEach(k => {
+      merged[k].sort((a, b) => toMin(a.start || '00:00') - toMin(b.start || '00:00'));
+    });
+    return merged;
+  }, [events]);
+
+  const daysInMonth = getDaysInMonth(viewYear, viewMonth);
+  const firstDay = getFirstDayOfMonth(viewYear, viewMonth);
+  const isCurrentMonth = viewYear === today.getFullYear() && viewMonth === today.getMonth();
+
+  function openCreate() {
+    setModalEvent(null);
+    setModalOpen(true);
+  }
+  function openEdit(ev) {
+    setModalEvent(ev);
+    setModalOpen(true);
+  }
+  function closeModal() {
+    setModalOpen(false);
+  }
+  async function handleSaved() {
+    setModalOpen(false);
+    await refresh();
+  }
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
+    else setViewMonth(m => m - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); }
+    else setViewMonth(m => m + 1);
+  }
+
+  if (!ready) return <LoadingScreen />;
+
+  const editingTasksText = modalEvent ? tasks.filter(t => t.eventId === modalEvent.id).map(t => t.text).join('\n') : '';
+
+  // Build grid: leading blanks + days
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  // Pad to complete last row
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px 80px' }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
+        <div>
+          <h1 style={{ fontSize: 27, fontWeight: 700, letterSpacing: '-0.5px', lineHeight: 1.2, color: 'var(--text-primary)' }}>
+            Your{' '}
+            <span style={{
+              background: 'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            }}>month</span>
+            {' '}at a glance.
+          </h1>
+          <p style={{ marginTop: 7, fontSize: 14, color: 'var(--text-secondary)', fontWeight: 400, lineHeight: 1.5 }}>
+            Tap any day to see what's on — or jump straight to today's schedule. ✦
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+          <AddEventButton onClick={openCreate} />
+          <SettingsGear />
+        </div>
+      </div>
+
+      {/* ── Nav ── */}
+      <div style={{ marginBottom: 24 }}>
+        <Nav page="calendar" />
+      </div>
+
+      {/* ── Legend ── */}
+      <Legend />
+
+      {/* ── Month nav ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 14,
+      }}>
+        <button onClick={prevMonth} style={{
+          width: 34, height: 34, borderRadius: '50%', border: 'none',
+          background: 'color-mix(in srgb, var(--surface) 60%, transparent)', cursor: 'pointer',
+          fontSize: 16, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 1px 6px color-mix(in srgb, var(--text-primary) 8%, transparent)',
+        }}>‹</button>
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--text-primary)' }}>
+            {MONTHS[viewMonth]} {viewYear}
+          </div>
+          {!isCurrentMonth && (
+            <button onClick={() => { setViewYear(today.getFullYear()); setViewMonth(today.getMonth()); }}
+              style={{
+                marginTop: 3, fontSize: 11.5, color: 'var(--accent-primary)', background: 'none',
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              }}>Back to today</button>
+          )}
+        </div>
+
+        <button onClick={nextMonth} style={{
+          width: 34, height: 34, borderRadius: '50%', border: 'none',
+          background: 'color-mix(in srgb, var(--surface) 60%, transparent)', cursor: 'pointer',
+          fontSize: 16, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 1px 6px color-mix(in srgb, var(--text-primary) 8%, transparent)',
+        }}>›</button>
+      </div>
+
+      {/* ── Day-of-week headers ── */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 5,
+        marginBottom: 6,
+      }}>
+        {DAYS.map(d => (
+          <div key={d} style={{
+            textAlign: 'center', fontSize: 11.5, fontWeight: 500,
+            color: 'var(--text-muted)', paddingBottom: 4, letterSpacing: '0.3px',
+          }}>{d}</div>
+        ))}
+      </div>
+
+      {/* ── Calendar grid ── */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 5,
+      }}>
+        {cells.map((day, i) => (
+          day === null
+            ? <div key={'blank-' + i} />
+            : <DayCell
+                key={day}
+                day={day}
+                month={viewMonth}
+                year={viewYear}
+                isToday={isCurrentMonth && day === today.getDate()}
+                events={EVENTS_BY_DATE_MERGED}
+                onEdit={openEdit}
+              />
+        ))}
+      </div>
+
+      {modalOpen && (
+        <EventModal
+          event={modalEvent}
+          defaultDate={TODAY_KEY}
+          initialTasksText={editingTasksText}
+          onClose={closeModal}
+          onSaved={handleSaved}
+        />
+      )}
+
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

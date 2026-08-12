@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Calendar — Today</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="supabase-client.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Theme tokens — "Yin" (light) / "Yang" (dark) ────────────── */
+    :root {
+      --bg-primary: #F6FAFD;
+      --bg-gradient: linear-gradient(135deg, #EFF6FC 0%, #DDEBF7 100%);
+      --surface: #FFFFFF;
+      --surface-elevated: rgba(255, 255, 255, 0.7);
+      --border: rgba(120, 175, 224, 0.25);
+      --text-primary: #22283A;
+      --text-secondary: #5C6B80;
+      --text-muted: #93A2B8;
+      --accent-primary: #5AAEE8;
+      --accent-secondary: #A8D4F2;
+      --accent-hover: #3E93D6;
+      --cat-work: #3F9E8F;
+      --cat-personal: #E0A8C9;
+      --cat-social: #F0C078;
+      --cat-travel: #8FD0B8;
+      --cat-free: #C4C0D8;
+      --cat-health: #E08F8F;
+    }
+    [data-theme="dark"] {
+      --bg-primary: #1C1D21;
+      --bg-gradient: linear-gradient(135deg, #1C1D21 0%, #14151A 100%);
+      --surface: #24252B;
+      --surface-elevated: rgba(30, 33, 42, 0.7);
+      --border: rgba(212, 175, 55, 0.15);
+      --text-primary: #ECEAF2;
+      --text-secondary: #A8A6B5;
+      --text-muted: #6E6C7A;
+      --accent-primary: #D4AF37;
+      --accent-secondary: #1B2A4A;
+      --accent-hover: #E8C158;
+      --cat-work: #2E8A78;
+      --cat-personal: #B0729A;
+      --cat-social: #D4AF37;
+      --cat-travel: #4A9B82;
+      --cat-free: #5A5870;
+      --cat-health: #B0605F;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.25s ease, color 0.25s ease;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent-primary) 35%, transparent); border-radius: 4px; }
+  </style>
+</head>
+<body>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('cal_theme');
+      if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
+  })();
+</script>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ─── Nav bar ──────────────────────────────────────────────────── */
+function Nav({ page }) {
+  const pages = [
+    { label: 'Today', href: 'index.html', key: 'today' },
+    { label: 'Calendar', href: 'calendar.html', key: 'calendar' },
+    { label: 'Action', href: 'action.html', key: 'action' },
+    { label: '✦ Bot', href: 'bot.html', key: 'bot' },
+  ];
+  return (
+    <div style={{
+      display: 'flex', gap: 4, alignItems: 'center',
+      background: 'var(--surface-elevated)',
+      border: '1px solid var(--border)',
+      borderRadius: 24, padding: '5px 6px',
+      backdropFilter: 'blur(12px)',
+    }}>
+      {pages.map(p => (
+        <a key={p.key} href={p.href} style={{
+          padding: '6px 16px', borderRadius: 20,
+          fontSize: 13, fontWeight: 500,
+          textDecoration: 'none',
+          background: p.key === page ? 'color-mix(in srgb, var(--accent-primary) 18%, transparent)' : 'transparent',
+          color: p.key === page ? 'var(--accent-hover)' : 'var(--text-secondary)',
+          border: p.key === page ? '1px solid color-mix(in srgb, var(--accent-primary) 28%, transparent)' : '1px solid transparent',
+          transition: 'all 0.15s ease',
+        }}>{p.label}</a>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Settings gear ──────────────────────────────────────────────── */
+function SettingsGear() {
+  return (
+    <a href="settings.html" title="Settings" style={{
+      width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--surface-elevated)',
+      border: '2px solid var(--border)',
+      color: 'var(--text-secondary)', fontSize: 26, fontWeight: 600,
+      textDecoration: 'none',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 2px 10px color-mix(in srgb, var(--text-primary) 8%, transparent)',
+    }}><span style={{ display: 'inline-block', transform: 'translateY(-2px)' }}>⚙</span></a>
+  );
+}
+
+/* ─── Add-event button ─────────────────────────────────────────── */
+function AddEventButton({ onClick }) {
+  return (
+    <button onClick={onClick} title="Add event" style={{
+      width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-hover))',
+      border: 'none', color: 'white', fontSize: 21, fontWeight: 600,
+      cursor: 'pointer', fontFamily: 'inherit', lineHeight: 1,
+      boxShadow: '0 3px 12px color-mix(in srgb, var(--accent-primary) 38%, transparent)',
+    }}><span style={{ display: 'inline-block', transform: 'translateY(-1.5px)' }}>+</span></button>
+  );
+}
+
+/* ─── Add/edit event modal — shared shape with calendar.html's copy.
+   Create mode when `event` is null (pre-filled only with `defaultDate`),
+   edit mode when an existing event object is passed in. ── */
+function EventModal({ event, defaultDate, initialTasksText, onClose, onSaved }) {
+  const isEdit = !!event;
+  const [title, setTitle] = useState(event ? event.title : '');
+  const [date, setDate] = useState(event ? event.date : defaultDate);
+  const [start, setStart] = useState(event ? event.start : '09:00');
+  const [end, setEnd] = useState(event ? event.end : '10:00');
+  const [type, setType] = useState(event ? event.type : 'work');
+  const [sub, setSub] = useState(event && event.sub ? event.sub : '');
+  // Tasks for an existing event are handed down from App's already-loaded
+  // `tasks` state (see openEdit below) rather than fetched here — Cal.*
+  // calls are async, so a synchronous useState initializer can't await one.
+  const [tasksText, setTasksText] = useState(initialTasksText || '');
+  const [saving, setSaving] = useState(false);
+
+  const valid = title.trim().length > 0 && date && start && end && start < end;
+
+  async function handleSave() {
+    if (!valid || saving) return;
+    setSaving(true);
+    const tasks = tasksText.split('\n').map(t => t.trim()).filter(Boolean);
+    const saved = await Cal.saveManualEvent({ title, date, start, end, type, sub, tasks }, isEdit ? event.id : null);
+    onSaved(saved);
+  }
+
+  const inputStyle = {
+    width: '100%', padding: '9px 12px', borderRadius: 10,
+    border: '1px solid var(--border)', background: 'var(--surface)',
+    color: 'var(--text-primary)', fontSize: 13.5, fontFamily: 'inherit', outline: 'none',
+  };
+  const labelStyle = {
+    fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
+    textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 5, display: 'block',
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'color-mix(in srgb, var(--text-primary) 35%, transparent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        backdropFilter: 'blur(4px)', padding: 20,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 420, background: 'var(--surface)',
+          borderRadius: 24, padding: '22px 22px 24px', maxHeight: '86vh', overflowY: 'auto',
+          boxShadow: '0 12px 40px color-mix(in srgb, var(--text-primary) 25%, transparent)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>{isEdit ? 'Edit event' : 'New event'}</div>
+          <span onClick={onClose} style={{ fontSize: 20, color: 'var(--text-secondary)', cursor: 'pointer', padding: 4, lineHeight: 1 }}>×</span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={labelStyle}>Title</label>
+            <input style={inputStyle} value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Dentist appointment" />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Date</label>
+            <input type="date" style={inputStyle} value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Start</label>
+              <input type="time" style={inputStyle} value={start} onChange={e => setStart(e.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>End</label>
+              <input type="time" style={inputStyle} value={end} onChange={e => setEnd(e.target.value)} />
+            </div>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Category</label>
+            <select style={inputStyle} value={type} onChange={e => setType(e.target.value)}>
+              {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Notes (optional)</label>
+            <input style={inputStyle} value={sub} onChange={e => setSub(e.target.value)} placeholder="Location, details..." />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Action items (optional, one per line)</label>
+            <textarea
+              style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }}
+              value={tasksText}
+              onChange={e => setTasksText(e.target.value)}
+              placeholder={'Pack bag\nBring insurance card'}
+            />
+          </div>
+
+          {start && end && start >= end && (
+            <div style={{ fontSize: 12, color: 'var(--cat-health)', fontWeight: 500 }}>End time must be after start time.</div>
+          )}
+
+          <button
+            onClick={handleSave}
+            disabled={!valid || saving}
+            style={{
+              marginTop: 4, padding: '11px 18px', borderRadius: 14,
+              border: 'none', cursor: (valid && !saving) ? 'pointer' : 'not-allowed',
+              background: (valid && !saving) ? 'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))' : 'var(--border)',
+              color: (valid && !saving) ? 'white' : 'var(--text-muted)',
+              fontSize: 14, fontWeight: 600, fontFamily: 'inherit',
+            }}
+          >{saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Add event')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Color palette by event type ─────────────────────────────── */
+function catStyle(name) {
+  const v = 'var(--cat-' + name + ')';
+  return {
+    bg: 'color-mix(in srgb, ' + v + ' 20%, var(--surface))',
+    bd: 'color-mix(in srgb, ' + v + ' 55%, transparent)',
+    tx: 'color-mix(in srgb, ' + v + ' 68%, var(--text-primary))',
+    tg: 'color-mix(in srgb, ' + v + ' 30%, transparent)',
+    sw: v,
+  };
+}
+const C = {
+  work: catStyle('work'), personal: catStyle('personal'), social: catStyle('social'),
+  travel: catStyle('travel'), free: catStyle('free'), health: catStyle('health'),
+};
+
+/* ─── Helpers ──────────────────────────────────────────────────── */
+const toMin  = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+const fmtT   = m => { const h=Math.floor(m/60), mn=m%60, ap=h>=12?'pm':'am'; return `${h>12?h-12:h||12}:${String(mn).padStart(2,'0')} ${ap}`; };
+const timeRange = (s, e) => {
+  const sm = toMin(s), em = toMin(e);
+  const fmt = m => { const h=Math.floor(m/60)%12||12, mn=m%60; return mn?`${h}:${String(mn).padStart(2,'0')}`:`${h}`; };
+  const sAP = sm<720?'am':'pm', eAP = em<720?'am':'pm';
+  return sAP===eAP ? `${fmt(sm)}–${fmt(em)} ${eAP}` : `${fmt(sm)} ${sAP}–${fmt(em)} ${eAP}`;
+};
+
+/* ─── Today's real calendar date, e.g. '2026-08-02' — Benny is a fresh
+   user with no seeded schedule, so "today" is just whatever day it
+   actually is on the device, not a fixed fictional date. ── */
+function todayKey() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/* ─── Resolve which day we're viewing from the URL ──────────────── */
+const _dp = (function() { try { return new URLSearchParams(window.location.search).get('date'); } catch(e) { return null; } })();
+const DISPLAY_DATE = _dp ? new Date(_dp + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' }) : new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+
+const TODAY_KEY = todayKey();
+const SELECTED_KEY = _dp || TODAY_KEY;
+const IS_TODAY = SELECTED_KEY === TODAY_KEY;
+
+/* ─── Manual event create/edit ───────────────────────────────────
+   Event/task storage now goes through Cal.* (supabase-client.js) instead
+   of localStorage — see that file for saveManualEvent/loadEvents/etc.
+   CATEGORIES/TYPE_EMOJI are defined there too now (this file used to be
+   missing TYPE_EMOJI entirely — a real bug fixed in the debug report —
+   which is one more reason those constants now live in exactly one
+   place instead of being copy-pasted per page). ── */
+
+/* ─── Layout constants ─────────────────────────────────────────── */
+const PX_HR    = 80;   // pixels per hour
+const DAY_START = 7;   // 7 AM
+const LABEL_W   = 52;  // width of hour-label column
+const GAP       = 12;  // gap between label col and event col
+
+const yOf  = t  => (toMin(t)/60  - DAY_START) * PX_HR;
+const hOf  = (s,e) => Math.max((toMin(e)-toMin(s))/60 * PX_HR, 28);
+
+/* ─── Hour grid — dayEnd now passed in as a prop (it depends on the
+   loaded events, which arrive asynchronously from Supabase, so it can no
+   longer be a module-level constant computed before first render). ── */
+function Grid({ dayEnd }) {
+  return (
+    <>
+      {Array.from({length: dayEnd - DAY_START + 1}, (_,i) => {
+        const h = DAY_START + i;
+        const y = i * PX_HR;
+        const label = h === 12 ? '12 pm' : h > 12 ? `${h-12} pm` : `${h} am`;
+        return (
+          <React.Fragment key={h}>
+            {/* hour label */}
+            <div style={{
+              position:'absolute', top: y - 7,
+              left: 0, width: LABEL_W,
+              textAlign:'right', fontSize:11,
+              color:'var(--text-muted)', fontWeight:500,
+              userSelect:'none', letterSpacing:'0.2px',
+            }}>{label}</div>
+            {/* grid line */}
+            <div style={{
+              position:'absolute', top: y,
+              left: LABEL_W + GAP, right: 0,
+              height: 1,
+              background: i === 0 ? 'transparent' : 'var(--border)',
+            }} />
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+/* ─── Now indicator ────────────────────────────────────────────── */
+function NowLine({ dayEnd }) {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
+  const min = now.getHours()*60 + now.getMinutes();
+  const y   = (min/60 - DAY_START) * PX_HR;
+  if (y < 0 || y > (dayEnd - DAY_START) * PX_HR) return null;
+  return (
+    <div style={{ position:'absolute', top: y, left: LABEL_W + GAP, right: 0, zIndex:30 }}>
+      <div style={{
+        position:'absolute', left:-6, top:-5,
+        width:10, height:10, borderRadius:'50%',
+        background:'var(--accent-primary)',
+        boxShadow:'0 0 0 3px color-mix(in srgb, var(--accent-primary) 22%, transparent)',
+      }} />
+      <div style={{
+        height:2, background:'linear-gradient(90deg, var(--accent-primary), var(--accent-hover) 70%, transparent)',
+        borderRadius:2, boxShadow:'0 1px 6px color-mix(in srgb, var(--accent-primary) 35%, transparent)',
+      }} />
+    </div>
+  );
+}
+
+/* ─── Single event bubble — tapping one goes to action.html to see
+   its specific to-do items, rather than opening an in-page modal. ── */
+function Bubble({ ev, top, onEdit }) {
+  const [hover, setHover] = useState(false);
+  const c = C[ev.type] || C.work;
+  const ht  = hOf(ev.start, ev.end) - 4;
+  const isXS  = ht < 40;
+  const isSM  = ht < 64;
+
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={() => { window.location.href = 'action.html?event=' + ev.id + '&date=' + SELECTED_KEY; }}
+      style={{
+        position: 'absolute',
+        top, left: LABEL_W + GAP,
+        right: 0, minHeight: ht,
+        background: c.bg,
+        border: '1.5px solid ' + c.bd,
+        borderRadius: 16,
+        padding: isXS ? '0 13px' : isSM ? '8px 14px' : '12px 16px',
+        display: 'flex',
+        flexDirection: isXS ? 'row' : 'column',
+        alignItems: isXS ? 'center' : 'flex-start',
+        gap: isXS ? 8 : 2,
+        backdropFilter: 'blur(10px)',
+        cursor: 'pointer',
+        transition: 'transform 0.16s ease, box-shadow 0.16s ease',
+        transform: hover ? 'translateY(-2px) scale(1.010)' : 'none',
+        boxShadow: hover
+          ? '0 8px 28px rgba(100,80,180,0.16)'
+          : '0 2px 10px rgba(100,80,180,0.08)',
+        zIndex: hover ? 20 : 1,
+        ...(ev.type === 'travel' && {
+          backgroundImage: 'repeating-linear-gradient(135deg, ' +
+            'transparent, transparent 9px, ' +
+            'rgba(255,255,255,0.22) 9px, rgba(255,255,255,0.22) 11px)',
+        }),
+      }}
+    >
+      <span style={{
+        width: isXS ? 8 : 10, height: isXS ? 8 : 10, borderRadius: '50%',
+        background: c.sw, flexShrink: 0, marginTop: isXS ? 0 : 4,
+      }} />
+
+      <div style={{ minWidth: 0, flex: 1, display:'flex', flexDirection:'column', gap:2 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:6 }}>
+          <div style={{
+            fontSize: isXS ? 12 : isSM ? 13 : 13.5,
+            fontWeight: 600, color: c.tx, lineHeight: 1.25, flex:1,
+          }}>{ev.title}</div>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <span style={{
+              fontSize:10, fontWeight:500, color:c.tx, opacity:0.5,
+              whiteSpace:'nowrap', marginTop:1, lineHeight:1.3,
+            }}>{timeRange(ev.start, ev.end)}</span>
+            <span
+              onClick={e => { e.stopPropagation(); onEdit(ev); }}
+              title="Edit event"
+              style={{ fontSize: 11, color: c.tx, opacity: hover ? 0.6 : 0, cursor: 'pointer', lineHeight: 1, transition: 'opacity 0.15s ease' }}
+            >✎</span>
+          </span>
+        </div>
+
+        {!isXS && ev.sub && (
+          <div style={{
+            fontSize: 11.5, color: c.tx, opacity: 0.72, lineHeight: 1.35,
+          }}>{ev.sub}</div>
+        )}
+
+        {!isSM && (
+          <div style={{ marginTop: 4, display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{
+              padding:'2px 9px', borderRadius:20,
+              fontSize:10.5, fontWeight:500,
+              background: c.tg, color: c.tx,
+            }}>{ev.tag}</span>
+            <span style={{ fontSize:10.5, color: c.tx, opacity:0.55, fontWeight:500 }}>
+              {timeRange(ev.start, ev.end)}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Summary pills — computed from today's real events, not fixed
+   text. Renders nothing when there's nothing scheduled yet. ── */
+function Pills({ events }) {
+  if (!events.length) return null;
+  const count = type => events.filter(e => e.type === type).length;
+  const freeMin = events.filter(e=>e.type==='free')
+    .reduce((a,e) => a + toMin(e.end) - toMin(e.start), 0);
+  const fh = Math.floor(freeMin/60), fm = freeMin%60;
+  const items = [];
+  const workN = count('work');
+  if (workN) items.push({ label: workN + (workN === 1 ? ' meeting' : ' meetings'), sw: C.work.sw });
+  if (freeMin) items.push({ label: `${fh}h ${fm}m free`, sw: C.free.sw });
+  const travelN = count('travel');
+  if (travelN) items.push({ label: travelN + (travelN === 1 ? ' travel block' : ' travel blocks'), sw: C.travel.sw });
+  const nextHealth = events.find(e => e.type === 'health');
+  if (nextHealth) items.push({ label: nextHealth.title + ' at ' + fmtT(toMin(nextHealth.start)), sw: C.health.sw });
+  if (!items.length) return null;
+  return (
+    <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:22 }}>
+      {items.map(p => (
+        <div key={p.label} style={{
+          display:'flex', alignItems:'center', gap:6,
+          background:'var(--surface-elevated)',
+          border:'1px solid var(--border)',
+          borderRadius:20, padding:'6px 13px',
+          fontSize:12.5, color:'var(--text-secondary)',
+          backdropFilter:'blur(8px)',
+        }}>
+          <div style={{ width:7, height:7, borderRadius:'50%', background:p.sw, flexShrink:0 }} />
+          {p.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Summary-only row — used for any day besides today. Events carry a
+   real `id`/`start`/`end`/etc, so they're tappable through to
+   action.html. ── */
+function SummaryRow({ ev, onEdit }) {
+  const c = C[ev.type] || C.work;
+  const clickable = !!ev.id;
+  return (
+    <div
+      onClick={clickable ? () => { window.location.href = 'action.html?event=' + ev.id + '&date=' + SELECTED_KEY; } : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        background: c.bg, border: '1.5px solid ' + c.bd,
+        borderRadius: 14, padding: '13px 16px',
+        cursor: clickable ? 'pointer' : 'default',
+      }}
+    >
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: c.sw, flexShrink: 0 }} />
+      <span style={{ fontSize: 14, fontWeight: 600, color: c.tx, flex: 1, minWidth: 0 }}>{ev.title}</span>
+      {ev.start && ev.end && (
+        <span style={{ fontSize: 11, fontWeight: 500, color: c.tx, opacity: 0.6, flexShrink: 0, whiteSpace: 'nowrap' }}>{timeRange(ev.start, ev.end)}</span>
+      )}
+      {clickable && ev.source !== 'manual' && (
+        <span title="Added by the assistant" style={{ fontSize: 9.5, fontWeight: 600, color: c.tx, opacity: 0.55, flexShrink: 0, letterSpacing: '0.3px' }}>✦ BOT</span>
+      )}
+      <span style={{ padding: '2px 9px', borderRadius: 20, fontSize: 10.5, fontWeight: 500, background: c.tg, color: c.tx, flexShrink: 0 }}>{ev.tag}</span>
+      {clickable && (
+        <span
+          onClick={e => { e.stopPropagation(); onEdit(ev); }}
+          title="Edit event"
+          style={{ fontSize: 12, color: c.tx, opacity: 0.5, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}
+        >✎</span>
+      )}
+    </div>
+  );
+}
+
+function EmptyDay() {
+  return (
+    <div style={{ textAlign: 'center', padding: '56px 20px', color: 'var(--text-secondary)' }}>
+      <div style={{ fontSize: 26, marginBottom: 8, color: 'var(--accent-primary)' }}>✦</div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>No events scheduled</div>
+      <div style={{ fontSize: 13, marginTop: 4 }}>Nothing on the books for this day.</div>
+    </div>
+  );
+}
+
+/* ─── Loading screen — shown while the auth check and the initial
+   Supabase fetch are in flight. Previously all of this was computed
+   synchronously from localStorage before the first render even happened;
+   a network round-trip means there's now a real (if brief) gap to cover. ── */
+function LoadingScreen() {
+  return (
+    <div style={{ maxWidth:660, margin:'0 auto', padding:'80px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+      Loading your day…
+    </div>
+  );
+}
+
+/* ─── App ──────────────────────────────────────────────────────── */
+function App() {
+  const scrollRef = useRef(null);
+  const [modalEvent, setModalEvent] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [events, setEvents] = useState(null);   // null = still loading
+  const [tasks, setTasks] = useState([]);
+  const [ready, setReady] = useState(false);
+
+  async function refresh() {
+    const [ev, tk] = await Promise.all([Cal.loadEvents(), Cal.loadTasks()]);
+    setEvents(ev);
+    setTasks(tk);
+  }
+
+  useEffect(() => {
+    (async () => {
+      const session = await Cal.requireSession();
+      if (!session) return; // Cal.requireSession already redirected to login.html
+      await refresh();
+      setReady(true);
+    })();
+  }, []);
+
+  // Everything that used to be computed once at module load (before this
+  // page had any async data source) now depends on the `events` state
+  // loaded above, so it's recomputed here instead. Mirrors the exact
+  // same filtering/sorting the original localStorage version did.
+  const { allEvents, daySummary, dayEnd } = React.useMemo(() => {
+    if (!events) return { allEvents: [], daySummary: [], dayEnd: 21 };
+    const eventsForDay = events.filter(e => (e.date || TODAY_KEY) === SELECTED_KEY);
+    const allEvents = (IS_TODAY ? eventsForDay : []).slice().sort((a, b) => toMin(a.start) - toMin(b.start));
+    const daySummary = eventsForDay.slice().sort((a, b) => toMin(a.start || '00:00') - toMin(b.start || '00:00'));
+    const dayEnd = Math.max(21, ...allEvents.map(e => Math.ceil(toMin(e.end) / 60)));
+    return { allEvents, daySummary, dayEnd };
+  }, [events]);
+  const totalH = (dayEnd - DAY_START) * PX_HR;
+
+  function openCreate() {
+    setModalEvent(null);
+    setModalOpen(true);
+  }
+  function openEdit(ev) {
+    setModalEvent(ev);
+    setModalOpen(true);
+  }
+  function closeModal() {
+    setModalOpen(false);
+  }
+  async function handleSaved() {
+    setModalOpen(false);
+    await refresh();
+  }
+
+  useEffect(() => {
+    if (!ready || !scrollRef.current) return;
+    const n = new Date();
+    const nowMin = n.getHours() * 60 + n.getMinutes();
+    // Prefer scrolling to whatever's happening now or coming up next, so a
+    // newly-added event later today is immediately visible on open instead
+    // of requiring a scroll to discover (it otherwise looked "missing" —
+    // the data was always there, just off-screen below the "now" position).
+    // Falls back to "now" itself if nothing's left today.
+    const upcoming = allEvents.find(ev => toMin(ev.end) > nowMin);
+    const y = upcoming ? yOf(upcoming.start) : (nowMin / 60 - DAY_START) * PX_HR;
+    scrollRef.current.scrollTop = Math.max(0, y - 140);
+  }, [ready]);
+
+  if (!ready) return <LoadingScreen />;
+
+  const editingTasksText = modalEvent ? tasks.filter(t => t.eventId === modalEvent.id).map(t => t.text).join('\n') : '';
+
+  return (
+    <div style={{ maxWidth:660, margin:'0 auto', padding:'40px 24px 80px' }}>
+
+      {/* ── Greeting ── */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:26 }}>
+        <div>
+          <h1 style={{ fontSize:27, fontWeight:700, letterSpacing:'-0.5px', lineHeight:1.2, color:'var(--text-primary)' }}>
+            Good morning{' '}
+            <span style={{
+              background:'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))',
+              WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent',
+            }}>Benny,</span>
+            {' '}here's your day.
+          </h1>
+          <p style={{ marginTop:7, fontSize:14, color:'var(--text-secondary)', fontWeight:400, lineHeight:1.5 }}>
+            {IS_TODAY && allEvents.length > 0 ? "Here's what's on your plate today. ✦" : 'A blank slate — ask your assistant to help fill it in. ✦'}
+          </p>
+          <div style={{
+            display:'inline-flex', alignItems:'center', gap:7,
+            marginTop:13, background:'var(--surface-elevated)',
+            border:'1px solid var(--border)', borderRadius:20,
+            padding:'5px 14px', fontSize:12.5, color:'var(--text-muted)',
+            backdropFilter:'blur(10px)',
+          }}>
+            <div style={{ width:6, height:6, borderRadius:'50%', background:'var(--accent-primary)' }} />
+            {DISPLAY_DATE}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+          <AddEventButton onClick={openCreate} />
+          <SettingsGear />
+        </div>
+      </div>
+
+      {/* ── Nav ── */}
+      <div style={{ marginBottom:28 }}>
+        <Nav page="today" />
+      </div>
+
+      {/* ── AI summary card — only shown for today, and only speaks to
+           real scheduled events, no fabricated specifics ── */}
+      {IS_TODAY && (
+        <div style={{
+          background:'linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 13%, transparent), color-mix(in srgb, var(--accent-hover) 9%, transparent))',
+          border:'1px solid color-mix(in srgb, var(--accent-primary) 26%, transparent)',
+          borderRadius:22, padding:'16px 18px', marginBottom:28,
+          display:'flex', gap:13, alignItems:'flex-start',
+          backdropFilter:'blur(14px)',
+        }}>
+          <div style={{
+            width:34, height:34, borderRadius:'50%',
+            background:'linear-gradient(135deg, var(--accent-primary), var(--accent-hover))',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:15, flexShrink:0,
+            boxShadow:'0 3px 10px color-mix(in srgb, var(--accent-primary) 38%, transparent)',
+            color:'white', fontWeight:700,
+          }}>✦</div>
+          {allEvents.length > 0 ? (
+            <p style={{ fontSize:13.5, color:'var(--text-primary)', lineHeight:1.6, paddingTop:2 }}>
+              You've got {allEvents.length} thing{allEvents.length === 1 ? '' : 's'} on the books today, starting with{' '}
+              <strong style={{ fontWeight:600 }}>{allEvents[0].title}</strong> at{' '}
+              <strong style={{ fontWeight:600 }}>{fmtT(toMin(allEvents[0].start))}</strong>.
+            </p>
+          ) : (
+            <p style={{ fontSize:13.5, color:'var(--text-primary)', lineHeight:1.6, paddingTop:2 }}>
+              Nothing on the books yet. Head to the{' '}
+              <a href="bot.html" style={{ color:'var(--accent-hover)', fontWeight:600 }}>assistant</a>{' '}
+              and tell it what you're working on — it can plan out your day or even a whole training block for you.
+            </p>
+          )}
+        </div>
+      )}
+
+      {IS_TODAY ? (
+        <>
+          {/* ── Timeline ── */}
+          <div
+            ref={scrollRef}
+            style={{
+              overflowY:'auto', maxHeight:'calc(100vh - 230px)',
+              paddingBottom:28, paddingTop:8,
+              scrollbarWidth:'thin',
+              scrollbarColor:'color-mix(in srgb, var(--accent-primary) 30%, transparent) transparent',
+            }}
+          >
+            <div style={{ position:'relative', height: totalH + 120 }}>
+              <Grid dayEnd={dayEnd} />
+              <NowLine dayEnd={dayEnd} />
+              {(() => {
+                let floor = 0;
+                return allEvents.map(ev => {
+                  const nat = yOf(ev.start) + 2;
+                  const top = Math.max(nat, floor);
+                  const ht  = hOf(ev.start, ev.end) - 4;
+                  // estimate rendered height: XS = row only (~36px), isSM = has subtitle (~72px), full = ht
+                  const est = ht < 40 ? 36 : ht < 64 ? 72 : Math.max(ht, 106);
+                  floor = top + est + 4;
+                  return <Bubble key={ev.id} ev={ev} top={top} onEdit={openEdit} />;
+                });
+              })()}
+            </div>
+          </div>
+
+          {/* ── Summary pills ── */}
+          <Pills events={allEvents} />
+        </>
+      ) : (
+        /* ── Summary-only day view — no hour-by-hour data exists for
+             this date, just a type+title overview ── */
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {daySummary.length === 0 ? (
+            <EmptyDay />
+          ) : daySummary.map((ev, i) => <SummaryRow key={ev.id || i} ev={ev} onEdit={openEdit} />)}
+        </div>
+      )}
+
+      {modalOpen && (
+        <EventModal
+          event={modalEvent}
+          defaultDate={SELECTED_KEY}
+          initialTasksText={editingTasksText}
+          onClose={closeModal}
+          onSaved={handleSaved}
+        />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

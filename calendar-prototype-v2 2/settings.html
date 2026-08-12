@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Calendar — Settings</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="supabase-client.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Theme tokens — "Yin" (light) / "Yang" (dark) ────────────── */
+    :root {
+      --bg-primary: #F6FAFD;
+      --bg-gradient: linear-gradient(135deg, #EFF6FC 0%, #DDEBF7 100%);
+      --surface: #FFFFFF;
+      --surface-elevated: rgba(255, 255, 255, 0.7);
+      --border: rgba(120, 175, 224, 0.25);
+      --text-primary: #22283A;
+      --text-secondary: #5C6B80;
+      --text-muted: #93A2B8;
+      --accent-primary: #5AAEE8;
+      --accent-secondary: #A8D4F2;
+      --accent-hover: #3E93D6;
+      --cat-work: #3F9E8F;
+      --cat-personal: #E0A8C9;
+      --cat-social: #F0C078;
+      --cat-travel: #8FD0B8;
+      --cat-free: #C4C0D8;
+      --cat-health: #E08F8F;
+    }
+    [data-theme="dark"] {
+      --bg-primary: #1C1D21;
+      --bg-gradient: linear-gradient(135deg, #1C1D21 0%, #14151A 100%);
+      --surface: #24252B;
+      --surface-elevated: rgba(30, 33, 42, 0.7);
+      --border: rgba(212, 175, 55, 0.15);
+      --text-primary: #ECEAF2;
+      --text-secondary: #A8A6B5;
+      --text-muted: #6E6C7A;
+      --accent-primary: #D4AF37;
+      --accent-secondary: #1B2A4A;
+      --accent-hover: #E8C158;
+      --cat-work: #2E8A78;
+      --cat-personal: #B0729A;
+      --cat-social: #D4AF37;
+      --cat-travel: #4A9B82;
+      --cat-free: #5A5870;
+      --cat-health: #B0605F;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.25s ease, color 0.25s ease;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent-primary) 35%, transparent); border-radius: 4px; }
+    @keyframes yy-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('cal_theme');
+      if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
+  })();
+</script>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+/* ─── Theme ───────────────────────────────────────────────────── */
+const THEME_KEY = 'cal_theme';
+function getTheme() {
+  try { return localStorage.getItem(THEME_KEY) || 'light'; } catch (e) { return 'light'; }
+}
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+  try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
+}
+
+/* ─── Nav bar ──────────────────────────────────────────────────── */
+function Nav({ page }) {
+  const pages = [
+    { label: 'Today', href: 'index.html', key: 'today' },
+    { label: 'Calendar', href: 'calendar.html', key: 'calendar' },
+    { label: 'Action', href: 'action.html', key: 'action' },
+    { label: '✦ Bot', href: 'bot.html', key: 'bot' },
+  ];
+  return (
+    <div style={{
+      display: 'flex', gap: 4, alignItems: 'center',
+      background: 'var(--surface-elevated)',
+      border: '1px solid var(--border)',
+      borderRadius: 24, padding: '5px 6px',
+      backdropFilter: 'blur(12px)',
+    }}>
+      {pages.map(p => (
+        <a key={p.key} href={p.href} style={{
+          padding: '6px 16px', borderRadius: 20,
+          fontSize: 13, fontWeight: 500,
+          textDecoration: 'none',
+          background: p.key === page ? 'color-mix(in srgb, var(--accent-primary) 18%, transparent)' : 'transparent',
+          color: p.key === page ? 'var(--accent-hover)' : 'var(--text-secondary)',
+          border: p.key === page ? '1px solid color-mix(in srgb, var(--accent-primary) 28%, transparent)' : '1px solid transparent',
+          transition: 'all 0.15s ease',
+        }}>{p.label}</a>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Yin-yang toggle icon — also reused, smaller + non-spinning, as the
+   "Appearance" row icon in the settings list below. ── */
+function YinYang({ spinning, size = 64 }) {
+  return (
+    <svg
+      width={size} height={size} viewBox="0 0 100 100"
+      style={{ animation: spinning ? 'yy-spin 0.6s ease-in-out 1' : 'none', flexShrink: 0 }}
+    >
+      <circle cx="50" cy="50" r="47" fill="var(--surface)" stroke="var(--border)" strokeWidth="2" />
+      <path
+        d="M50,3 A47,47 0 0,1 50,97 A23.5,23.5 0 0,1 50,50 A23.5,23.5 0 0,0 50,3 Z"
+        fill="var(--text-primary)"
+      />
+      <circle cx="50" cy="26.5" r="6.5" fill="var(--surface)" />
+      <circle cx="50" cy="73.5" r="6.5" fill="var(--text-primary)" />
+    </svg>
+  );
+}
+
+/* ─── Hand-drawn line icons for the Profile / Privacy rows — no emoji,
+   same idea as bot.html's RobotIcon/BrainIcon: plain stroke-based SVGs
+   that inherit color via currentColor so they pick up the row's
+   active/inactive tint automatically. ── */
+function FaceIcon({ size = 19 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="8.7" cy="10.4" r="1.15" fill="currentColor" />
+      <circle cx="15.3" cy="10.4" r="1.15" fill="currentColor" />
+      <path d="M8 15c1 1.3 2.4 2 4 2s3-0.7 4-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+function LockIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <rect x="5" y="11" width="14" height="9" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+      <circle cx="12" cy="15.3" r="1.3" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconBadge({ active, onClick, children }) {
+  return (
+    <button onClick={onClick} style={{
+      width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: active ? 'color-mix(in srgb, var(--accent-primary) 18%, transparent)' : 'color-mix(in srgb, var(--surface) 55%, transparent)',
+      border: '1px solid ' + (active ? 'color-mix(in srgb, var(--accent-primary) 28%, transparent)' : 'var(--border)'),
+      color: active ? 'var(--accent-hover)' : 'var(--text-secondary)',
+      cursor: 'pointer', fontFamily: 'inherit', padding: 0,
+    }}>{children}</button>
+  );
+}
+
+function SettingsRow({ icon, label, active, onClick }) {
+  return (
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', gap: 14,
+        padding: '13px 18px', borderRadius: 18,
+        background: active ? 'color-mix(in srgb, var(--accent-primary) 18%, transparent)' : 'var(--surface-elevated)',
+        border: '1px solid ' + (active ? 'color-mix(in srgb, var(--accent-primary) 28%, transparent)' : 'var(--border)'),
+        backdropFilter: 'blur(10px)',
+        transition: 'all 0.15s ease',
+      }}
+    >
+      <IconBadge active={active} onClick={onClick}>{icon}</IconBadge>
+      <span style={{ fontSize: 14.5, fontWeight: 600, color: active ? 'var(--accent-hover)' : 'var(--text-primary)' }}>{label}</span>
+    </div>
+  );
+}
+
+function StubPanel({ label }) {
+  return (
+    <div style={{
+      background: 'var(--surface-elevated)', border: '1px solid var(--border)',
+      borderRadius: 20, padding: '36px 24px', textAlign: 'center',
+      backdropFilter: 'blur(14px)',
+    }}>
+      <div style={{
+        width: 44, height: 44, borderRadius: '50%', margin: '0 auto 14px',
+        background: 'color-mix(in srgb, var(--accent-primary) 15%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--accent-primary) 28%, transparent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+      }}>✦</div>
+      <div style={{ fontSize: 14.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>Coming soon.</div>
+    </div>
+  );
+}
+
+/* ─── Loading screen — shown while the auth check is in flight. ───── */
+function LoadingScreen() {
+  return (
+    <div style={{ maxWidth:660, margin:'0 auto', padding:'80px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+      Loading your day…
+    </div>
+  );
+}
+
+/* ─── Profile info row ───────────────────────────────────────────── */
+function ProfileRow({ label, value }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</div>
+      <div style={{ fontSize: 14, color: 'var(--text-primary)', marginTop: 1 }}>{value}</div>
+    </div>
+  );
+}
+
+/* ─── Profile panel — shows the real signed-in Supabase user (email,
+   member-since from user.created_at) plus a working sign-out control.
+   Display-name/password editing still isn't wired up. ── */
+function ProfilePanel({ user }) {
+  const [signingOut, setSigningOut] = useState(false);
+
+  if (!user) {
+    return (
+      <div style={{
+        background: 'var(--surface-elevated)', border: '1px solid var(--border)',
+        borderRadius: 20, padding: '28px 24px', textAlign: 'center',
+        backdropFilter: 'blur(14px)', fontSize: 13, color: 'var(--text-secondary)',
+      }}>
+        Loading profile…
+      </div>
+    );
+  }
+
+  const initial = (user.email || '?').charAt(0).toUpperCase();
+  const memberSince = user.created_at
+    ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    : '—';
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    await Cal.signOut();
+  }
+
+  return (
+    <div style={{
+      background: 'var(--surface-elevated)', border: '1px solid var(--border)',
+      borderRadius: 20, padding: '28px 24px',
+      backdropFilter: 'blur(14px)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 26 }}>
+        <div style={{
+          width: 60, height: 60, borderRadius: '50%', flexShrink: 0,
+          background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-hover))',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 24, fontWeight: 700, color: 'white',
+          boxShadow: '0 4px 16px color-mix(in srgb, var(--accent-primary) 35%, transparent)',
+        }}>{initial}</div>
+        <div>
+          <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.25 }}>{user.email}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>New here — starting with a blank schedule</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <ProfileRow label="Email" value={user.email} />
+        <ProfileRow label="Member since" value={memberSince} />
+      </div>
+
+      <div style={{
+        marginTop: 22, paddingTop: 18, borderTop: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+      }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          Profile editing isn't available yet.
+        </div>
+        <button
+          onClick={handleSignOut}
+          disabled={signingOut}
+          style={{
+            padding: '9px 18px', borderRadius: 14, flexShrink: 0,
+            border: '1px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--text-primary)', fontSize: 13, fontWeight: 600,
+            fontFamily: 'inherit', cursor: signingOut ? 'not-allowed' : 'pointer',
+            opacity: signingOut ? 0.6 : 1,
+          }}
+        >{signingOut ? 'Signing out…' : 'Sign out'}</button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Appearance readout — no controls of its own; the yin-yang icon on
+   the "Appearance" row above (see App()) is the only theme toggle. ── */
+function AppearancePanel({ theme }) {
+  const isDark = theme === 'dark';
+  return (
+    <div style={{
+      background: 'var(--surface-elevated)', border: '1px solid var(--border)',
+      borderRadius: 20, padding: '30px 24px', textAlign: 'center',
+      backdropFilter: 'blur(14px)',
+    }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+        {isDark ? 'Yang · Dark' : 'Yin · Light'}
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 5, lineHeight: 1.5, maxWidth: 300, marginLeft: 'auto', marginRight: 'auto' }}>
+        Tap the icon above to switch between light and dark mode. Your preference is saved on this device.
+      </div>
+    </div>
+  );
+}
+
+/* ─── App ──────────────────────────────────────────────────────── */
+function App() {
+  const [theme, setThemeState] = useState(getTheme);
+  const [tab, setTab] = useState('appearance');
+  const [spinning, setSpinning] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const session = await Cal.requireSession();
+      if (!session) return; // Cal.requireSession already redirected to login.html
+      const u = await Cal.getUser();
+      setUser(u);
+      setReady(true);
+    })();
+  }, []);
+
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    setThemeState(next);
+  }
+
+  /* The Appearance row's icon is the app's only theme toggle now (the
+     duplicate icon/button that used to live inside AppearancePanel was
+     removed per explicit request) — clicking it both selects the
+     Appearance tab and flips the theme in one action. */
+  function handleAppearanceClick() {
+    setTab('appearance');
+    setSpinning(true);
+    toggleTheme();
+    setTimeout(() => setSpinning(false), 650);
+  }
+
+  if (!ready) return <LoadingScreen />;
+
+  return (
+    <div style={{ maxWidth: 660, margin: '0 auto', padding: '40px 24px 80px' }}>
+
+      <div style={{ marginBottom: 26 }}>
+        <h1 style={{ fontSize: 27, fontWeight: 700, letterSpacing: '-0.5px', lineHeight: 1.2, color: 'var(--text-primary)' }}>
+          System{' '}
+          <span style={{
+            background: 'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+          }}>preferences.</span>
+        </h1>
+        <p style={{ marginTop: 7, fontSize: 14, color: 'var(--text-secondary)', fontWeight: 400, lineHeight: 1.5 }}>
+          Profile, privacy, and how things look. ✦
+        </p>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <Nav page="settings" />
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 22 }}>
+        <SettingsRow
+          icon={<YinYang size={24} spinning={spinning} />}
+          label="Appearance"
+          active={tab === 'appearance'}
+          onClick={handleAppearanceClick}
+        />
+        <SettingsRow
+          icon={<FaceIcon />}
+          label="Profile"
+          active={tab === 'profile'}
+          onClick={() => setTab('profile')}
+        />
+        <SettingsRow
+          icon={<LockIcon />}
+          label="Privacy & Security"
+          active={tab === 'privacy'}
+          onClick={() => setTab('privacy')}
+        />
+      </div>
+
+      {tab === 'appearance' && <AppearancePanel theme={theme} />}
+      {tab === 'profile' && <ProfilePanel user={user} />}
+      {tab === 'privacy' && <StubPanel label="Privacy & Security" />}
+
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,1701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Calendar — Bot</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="supabase-client.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Theme tokens — "Yin" (light) / "Yang" (dark) ────────────── */
+    :root {
+      --bg-primary: #F6FAFD;
+      --bg-gradient: linear-gradient(135deg, #EFF6FC 0%, #DDEBF7 100%);
+      --surface: #FFFFFF;
+      --surface-elevated: rgba(255, 255, 255, 0.7);
+      --border: rgba(120, 175, 224, 0.25);
+      --text-primary: #22283A;
+      --text-secondary: #5C6B80;
+      --text-muted: #93A2B8;
+      --accent-primary: #5AAEE8;
+      --accent-secondary: #A8D4F2;
+      --accent-hover: #3E93D6;
+      --cat-work: #3F9E8F;
+      --cat-personal: #E0A8C9;
+      --cat-social: #F0C078;
+      --cat-travel: #8FD0B8;
+      --cat-free: #C4C0D8;
+      --cat-health: #E08F8F;
+    }
+    [data-theme="dark"] {
+      --bg-primary: #1C1D21;
+      --bg-gradient: linear-gradient(135deg, #1C1D21 0%, #14151A 100%);
+      --surface: #24252B;
+      --surface-elevated: rgba(30, 33, 42, 0.7);
+      --border: rgba(212, 175, 55, 0.15);
+      --text-primary: #ECEAF2;
+      --text-secondary: #A8A6B5;
+      --text-muted: #6E6C7A;
+      --accent-primary: #D4AF37;
+      --accent-secondary: #1B2A4A;
+      --accent-hover: #E8C158;
+      --cat-work: #2E8A78;
+      --cat-personal: #B0729A;
+      --cat-social: #D4AF37;
+      --cat-travel: #4A9B82;
+      --cat-free: #5A5870;
+      --cat-health: #B0605F;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.25s ease, color 0.25s ease;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent-primary) 35%, transparent); border-radius: 4px; }
+
+    @keyframes dot-bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+      30% { transform: translateY(-5px); opacity: 1; }
+    }
+    .dot1 { animation: dot-bounce 1.3s ease-in-out infinite 0s; }
+    .dot2 { animation: dot-bounce 1.3s ease-in-out infinite 0.18s; }
+    .dot3 { animation: dot-bounce 1.3s ease-in-out infinite 0.36s; }
+
+    @keyframes cal-fill {
+      0%, 60%, 100% { opacity: 0.25; }
+      30% { opacity: 1; }
+    }
+    .cal-cell1 { animation: cal-fill 1.3s ease-in-out infinite 0s; }
+    .cal-cell2 { animation: cal-fill 1.3s ease-in-out infinite 0.18s; }
+    .cal-cell3 { animation: cal-fill 1.3s ease-in-out infinite 0.36s; }
+
+    @keyframes msg-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .msg-in { animation: msg-in 0.22s ease forwards; }
+
+    textarea:focus, input:focus { outline: none; }
+  </style>
+</head>
+<body>
+<script>
+  (function() {
+    try {
+      var t = localStorage.getItem('cal_theme');
+      if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
+  })();
+</script>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ─── Schedule context — Benny is a brand-new user with a blank
+   schedule. This starts empty and only ever grows via the assistant's
+   own ADD_EVENT directive (see below) or, in principle, manual entry —
+   there's no seeded sample data. Real ids line up with whatever
+   bot-created events exist in localStorage; see ADD_EVENT parsing. */
+const TODAY = [];
+
+/* Today's real calendar date, e.g. '2026-08-02' — not a fixed fictional
+   date, so a plan the assistant blocks out actually lands on the days
+   Benny will see when he opens the calendar. */
+function todayKey() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+const TODAY_KEY = todayKey();
+const TODAY_LABEL = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+function addDaysKey(dateKey, n) {
+  const d = new Date(dateKey + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/* ─── Save-to-action wiring ───────────────────────────────────────
+   Shared with action.html via Cal.addTasks() (supabase-client.js) now,
+   not a raw localStorage key. Bot-authored items are matched to a
+   schedule activity by keyword when possible, otherwise they land in a
+   standalone "From Assistant" card. Empty by default — Benny has no
+   fixed schedule for these keywords to match against; this only becomes
+   useful once he's built up a real day through the assistant (each new
+   event carries its own real id, so ADD_TASKS_FOR / matchEventByTitle
+   below is what actually links things in practice, not this keyword
+   list). */
+const EVENT_KEYWORDS = {};
+
+function extractBulletItems(text) {
+  return (text || '').split('\n')
+    .map(function(l) { return l.trim(); })
+    .filter(function(l) { return l[0] === '•'; })
+    .map(function(l) { return l.replace(/^•\s*/, '').trim(); })
+    .filter(Boolean);
+}
+
+function matchEventId(text) {
+  var t = (text || '').toLowerCase();
+  var bestId = null, bestScore = 0;
+  Object.keys(EVENT_KEYWORDS).forEach(function(id) {
+    var score = EVENT_KEYWORDS[id].reduce(function(a, kw) { return a + (t.indexOf(kw) !== -1 ? 1 : 0); }, 0);
+    if (score > bestScore) { bestScore = score; bestId = Number(id); }
+  });
+  return bestScore > 0 ? bestId : null;
+}
+
+/* Matches Claude's own ADD_TASKS_FOR title hint against today's schedule —
+   far more reliable than EVENT_KEYWORDS since Claude actually knows which
+   event it was just discussing, rather than us guessing from a fixed
+   keyword list that only covers a handful of events. */
+function normTitle(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+// Shared exact-then-substring-either-direction title match, used by both
+// matchEventByTitle (linking loose action items) and resolveRemovals
+// (cancelling by title) so the fuzzy-match rule only lives in one place.
+function normTitleMatches(normA, normB) {
+  return normA === normB || normA.indexOf(normB) !== -1 || normB.indexOf(normA) !== -1;
+}
+// Matches against `events` — Benny's real current schedule, freshly loaded
+// from Supabase by the caller (see handleAction below) — rather than a
+// fixed module-level list, since which events exist now depends on what's
+// actually in the database, not a static sample.
+function matchEventByTitle(titleHint, events) {
+  var hint = normTitle(titleHint);
+  if (!hint || hint === 'general' || hint === 'none' || hint === 'unlinked') return null;
+  var exact = events.find(function(e) { return normTitle(e.title) === hint; });
+  if (exact) return exact.id;
+  var partial = events.find(function(e) { return normTitleMatches(normTitle(e.title), hint); });
+  return partial ? partial.id : null;
+}
+
+async function saveToActionPage(content, hintEventId) {
+  var items = extractBulletItems(content);
+  if (!items.length) return false;
+  var eventId = (hintEventId !== undefined && hintEventId !== null) ? hintEventId : matchEventId(content);
+  return await Cal.addTasks(eventId, items);
+}
+
+/* ─── Add-to-schedule wiring ──────────────────────────────────────
+   Shared with index.html / calendar.html / action.html via Cal.saveEvents()/
+   Cal.saveEventTasks() (supabase-client.js) now, not a raw localStorage key.
+   Claude signals new events with one or more trailing
+   "ADD_EVENT: Title | YYYY-MM-DD | HH:MM-HH:MM | type | task1; task2"
+   lines (see SYSTEM_PROMPT) — one line per event, so a single response
+   can block out an entire multi-day plan (e.g. daily training runs for
+   a month), not just one event at a time. We parse every matching line
+   out, strip them from the displayed text, and only write them to the
+   schedule (plus any inline tasks) once the user presses the single
+   confirmation button covering all of them. */
+// [ \t]* (not \s*) around every separator: \s also matches \n, so when the
+// trailing tasks field is empty (line ends right after the last "|"), a
+// \s* there would greedily eat the newline and let (.*)$ keep matching
+// into the START of the NEXT ADD_EVENT line, silently swallowing an entire
+// second event as literal "task text" on the first. Horizontal-only
+// whitespace keeps every field's match confined to its own line.
+const ADD_EVENT_RE = /^ADD_EVENT:[ \t]*(.+?)[ \t]*\|[ \t]*(\d{4}-\d{2}-\d{2})[ \t]*\|[ \t]*(\d{1,2}:\d{2})[ \t]*-[ \t]*(\d{1,2}:\d{2})[ \t]*\|[ \t]*(work|personal|social|travel|free|health)[ \t]*\|[ \t]*(.*)$/gim;
+
+/* Occasionally the model runs two directive lines together on the same
+   physical line instead of separating them with a newline (most often
+   when the preceding line's trailing field is empty, e.g. "...| personal |
+   ADD_EVENT: Next Thing | ..." with no line break before the second
+   ADD_EVENT). Since the regexes below are anchored per-line (^...$ with
+   the m flag, . not matching \n), an unbroken run like that gets read as
+   ONE line — the tail of the first directive's own capture (its tasks
+   field, which greedily eats "(.*)$") swallows the entire second
+   directive as literal text, and the second event silently never gets
+   parsed at all. Force a line break before any mid-string occurrence of
+   the given directive name so each one is guaranteed its own line before
+   matching — robust regardless of whether the model actually followed
+   the "one directive per line" instruction. */
+function normalizeDirectiveLines(text, name) {
+  var re = new RegExp('(?<!^)(?<!\\n)' + name + ':', 'gm');
+  return (text || '').replace(re, '\n' + name + ':');
+}
+
+// Every directive parser below strips its own directive line(s) then
+// collapses whatever blank-line gap that leaves behind — shared here so
+// the same two-line cleanup isn't repeated in each one.
+function collapseBlankLines(s) {
+  return (s || '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function parseAddEvents(text) {
+  var normalizedText = normalizeDirectiveLines(text, 'ADD_EVENT');
+  var matches = Array.from(normalizedText.matchAll(ADD_EVENT_RE));
+  var stamp = Date.now();
+  var events = matches.map(function(match, i) {
+    var title = match[1].trim();
+    var date = match[2].trim();
+    var start = match[3].padStart(5, '0');
+    var end = match[4].padStart(5, '0');
+    var type = match[5].toLowerCase();
+    var taskText = (match[6] || '').trim();
+    var tasks = taskText ? taskText.split(';').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+    return {
+      id: 'bot_' + stamp + '_' + i,
+      type: type,
+      title: title,
+      sub: 'Added by assistant',
+      date: date,
+      start: start,
+      end: end,
+      tag: type.charAt(0).toUpperCase() + type.slice(1),
+      tasks: tasks,
+    };
+  });
+  var cleanText = collapseBlankLines(normalizedText
+    .replace(ADD_EVENT_RE, '')
+    // Safety net: if a response gets cut off mid-event (e.g. a very long
+    // multi-week plan hitting the token limit), a trailing partial
+    // "ADD_EVENT: ..." line won't match the full pattern above and would
+    // otherwise leak raw directive syntax into the visible reply.
+    .replace(/^ADD_EVENT:.*$/im, ''));
+  return { events: events, cleanText: cleanText };
+}
+
+/* Claude names which event (by title) a bulleted list of action items
+   belongs to — see SYSTEM_PROMPT's "LINKING ACTION ITEMS" section.
+   Stripped from the displayed text just like ADD_EVENT. */
+const ADD_TASKS_RE = /^ADD_TASKS_FOR:\s*(.+)$/im;
+
+function parseTasksFor(text) {
+  var match = (text || '').match(ADD_TASKS_RE);
+  if (!match) return { eventTitleHint: null, cleanText: text };
+  var eventTitleHint = match[1].trim();
+  var cleanText = collapseBlankLines((text || '').replace(ADD_TASKS_RE, ''));
+  return { eventTitleHint: eventTitleHint, cleanText: cleanText };
+}
+
+/* Claude proposes a small set of choices for Benny to pick from — a time
+   window, a duration, a frequency, anything with a handful of discrete
+   answers — rather than guessing one itself or asking an open question
+   with no way to answer it in one tap. See SYSTEM_PROMPT's "PROPOSING
+   QUICK-PICK OPTIONS" section. Stripped from the displayed text just
+   like ADD_EVENT/ADD_TASKS_FOR; the app renders the choices as tappable
+   buttons instead of Claude writing them out as a bulleted list. */
+const QUICK_OPTIONS_RE = /^QUICK_OPTIONS:\s*(.+)$/im;
+
+function parseQuickOptions(text) {
+  var match = (text || '').match(QUICK_OPTIONS_RE);
+  if (!match) return { quickOptions: [], cleanText: text };
+  var quickOptions = match[1].split(';').map(function(t) { return t.trim(); }).filter(Boolean);
+  var cleanText = collapseBlankLines((text || '').replace(QUICK_OPTIONS_RE, ''));
+  return { quickOptions: quickOptions, cleanText: cleanText };
+}
+
+/* Fallback for when Claude proposes time windows as its own bulleted list
+   instead of using the QUICK_OPTIONS directive above — models don't always
+   follow formatting instructions. If EVERY bullet in the reply leads with
+   a time range (e.g. "7:45-8:30am free time (before commute)") and the
+   reply ends in a question, treat those bullets as the pickable windows:
+   strip them out of the displayed text (so they don't also get offered as
+   a generic "Save to action page" list) and hand back just the times.
+   (Narrowly scoped to time ranges — a generic bulleted-list-plus-question
+   is too common and ambiguous a shape to safely auto-convert otherwise.) */
+const TIME_RANGE_LEAD_RE = /^(\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[-–]\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))/i;
+
+function extractBulletTimeOptions(text) {
+  var trimmed = (text || '').trim();
+  if (!trimmed || trimmed.charAt(trimmed.length - 1) !== '?') return { quickOptions: [], cleanText: text };
+  var lines = trimmed.split('\n');
+  var stripIdx = [];
+  var options = [];
+  var bulletCount = 0;
+  lines.forEach(function(line, i) {
+    var t = line.trim();
+    if (t.charAt(0) !== '•') return;
+    bulletCount++;
+    var m = t.slice(1).trim().match(TIME_RANGE_LEAD_RE);
+    if (m) { stripIdx.push(i); options.push(m[1].replace(/\s+/g, '')); }
+  });
+  if (options.length < 2 || options.length !== bulletCount) return { quickOptions: [], cleanText: text };
+  var cleanText = collapseBlankLines(lines.filter(function(line, i) { return stripIdx.indexOf(i) === -1; }).join('\n'));
+  return { quickOptions: options, cleanText: cleanText };
+}
+
+// Dedup guard (skip re-adding the same event twice — e.g. re-clicking an
+// old "Add to schedule" button) now lives in Cal.saveEvents() itself
+// (supabase-client.js), matching content against what's already in the
+// database instead of a localStorage array built up here.
+
+/* ─── Time-conflict detection — deterministic, not left to the model ──
+   Reported bug: Claude only *sometimes* noticed when a newly-proposed
+   event overlapped something already on the schedule — expected, since
+   "does this overlap" is a judgment call the model has to make on its
+   own each time (same class of unreliability as QUICK_OPTIONS elsewhere
+   in this file), and it isn't told to check at all right now. Rather
+   than lean harder on prompt wording (which the QUICK_OPTIONS history in
+   this file shows tops out well short of 100%), this checks every
+   proposed event in real code against Benny's actual schedule — so it
+   catches a conflict every single time, independent of anything the
+   model did or didn't notice. Does not block adding the event (a
+   deliberate overlap is sometimes exactly what Benny wants, e.g. two
+   tentative options) — just guarantees he's shown it, every time. */
+function toMin(t) {
+  var parts = t.split(':').map(Number);
+  return parts[0] * 60 + parts[1];
+}
+function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return toMin(aStart) < toMin(bEnd) && toMin(bStart) < toMin(aEnd);
+}
+function fmtT12(hhmm) {
+  var parts = hhmm.split(':').map(Number);
+  var h = parts[0], m = parts[1];
+  var ap = h >= 12 ? 'pm' : 'am';
+  var h12 = h % 12 || 12;
+  return h12 + (m ? ':' + String(m).padStart(2, '0') : '') + ap;
+}
+
+/* Checks every newly-proposed event against (a) Benny's real existing
+   schedule, minus anything this same response is also removing (e.g. a
+   reschedule — remove the old slot, add the new one — isn't a conflict
+   with itself), and (b) every other new event earlier in this same
+   batch, in case Claude proposes two overlapping events in one go. */
+function findConflicts(newEvents, removalIds, botEvents) {
+  if (!newEvents || !newEvents.length) return [];
+  var excluded = removalIds || [];
+  var existing = botEvents.filter(function(e) { return excluded.indexOf(e.id) === -1; });
+  var conflicts = [];
+  newEvents.forEach(function(ev, i) {
+    existing.concat(newEvents.slice(0, i)).forEach(function(other) {
+      if (other.date !== ev.date || other.id === ev.id) return;
+      if (!rangesOverlap(ev.start, ev.end, other.start, other.end)) return;
+      conflicts.push({
+        date: ev.date,
+        eventTitle: ev.title, eventStart: ev.start, eventEnd: ev.end,
+        otherTitle: other.title, otherStart: other.start, otherEnd: other.end,
+      });
+    });
+  });
+  return conflicts;
+}
+
+/* ─── Remove-from-schedule wiring ──────────────────────────────────
+   Shared with index.html / calendar.html / action.html via the same
+   localStorage key. Claude signals a removal with one or more trailing
+   "REMOVE_EVENT: <exact title> | <YYYY-MM-DD or ALL>" lines (see
+   SYSTEM_PROMPT) — resolved against Benny's real current schedule
+   (buildScheduleContext, below) at response time so the confirm button
+   can show an accurate count and the actual event ids are locked in
+   before Benny clicks, rather than re-matching by title at click time
+   against a schedule that may have changed. */
+// Same [ \t]*-not-\s* reasoning as ADD_EVENT_RE above.
+const REMOVE_EVENT_RE = /^REMOVE_EVENT:[ \t]*(.+?)[ \t]*\|[ \t]*(\d{4}-\d{2}-\d{2}|ALL)[ \t]*$/gim;
+
+function parseRemoveEvents(text) {
+  // See normalizeDirectiveLines' comment above parseAddEvents — same
+  // run-together-on-one-line failure mode is possible here too.
+  var normalizedText = normalizeDirectiveLines(text, 'REMOVE_EVENT');
+  var matches = Array.from(normalizedText.matchAll(REMOVE_EVENT_RE));
+  var removals = matches.map(function(m) { return { title: m[1].trim(), date: m[2].trim() }; });
+  var cleanText = collapseBlankLines(normalizedText
+    .replace(REMOVE_EVENT_RE, '')
+    // Safety net for a truncated trailing line, same reasoning as ADD_EVENT's.
+    .replace(/^REMOVE_EVENT:.*$/im, ''));
+  return { removals: removals, cleanText: cleanText };
+}
+
+/* Resolves title/date removal requests against the real current schedule.
+   Title match is exact-then-substring (same approach as matchEventByTitle),
+   date match is exact or ALL (every occurrence of that title, for cancelling
+   a whole multi-day plan in one shot). Returns the matched bot event ids. */
+function resolveRemovals(removals, botEvents) {
+  if (!removals || !removals.length) return [];
+  var matchedIds = [];
+  removals.forEach(function(r) {
+    var hint = normTitle(r.title);
+    if (!hint) return;
+    botEvents.forEach(function(ev) {
+      if (matchedIds.indexOf(ev.id) !== -1) return;
+      if (!normTitleMatches(normTitle(ev.title), hint)) return;
+      if (r.date === 'ALL' || ev.date === r.date) matchedIds.push(ev.id);
+    });
+  });
+  return matchedIds;
+}
+
+// Deleting the given bot event ids (and any tasks tied to them) now goes
+// straight through Cal.deleteEvents() (supabase-client.js) at the call site
+// in handleAction below — the `tasks.event_id ... on delete cascade`
+// foreign key (sql/schema.sql) removes their tasks automatically, so there's
+// no separate task-filtering step to do here anymore.
+
+/* Live snapshot of Benny's real schedule, appended to the system prompt at
+   request time (not baked into the static SYSTEM_PROMPT array) so it's
+   always current — Claude needs this to know what actually exists before
+   it can remove something by title, avoid scheduling an obvious duplicate,
+   or answer "what's on my calendar" accurately. Capped so a heavily-used
+   calendar doesn't blow out the prompt. */
+const SCHEDULE_CONTEXT_MAX = 150;
+function buildScheduleContext(botEvents) {
+  var events = botEvents.slice().sort(function(a, b) {
+    var ak = a.date + ' ' + a.start, bk = b.date + ' ' + b.start;
+    return ak < bk ? -1 : ak > bk ? 1 : 0;
+  });
+  if (!events.length) {
+    return 'CURRENT SCHEDULE: nothing on it yet — Benny is starting with a completely blank calendar. Everything on it from here on will have come from you.';
+  }
+  var shown = events.slice(0, SCHEDULE_CONTEXT_MAX);
+  var lines = shown.map(function(e) { return '  ' + e.date + '  ' + e.start + '-' + e.end + '   ' + e.title; });
+  var header = 'CURRENT SCHEDULE (everything already on Benny\'s calendar — use these exact titles/dates when he refers to something existing, e.g. to cancel it, and don\'t schedule an obvious duplicate):';
+  var footer = events.length > SCHEDULE_CONTEXT_MAX ? ['  ...and ' + (events.length - SCHEDULE_CONTEXT_MAX) + ' more further out, not shown here.'] : [];
+  return [header].concat(lines, footer).join('\n');
+}
+
+/* ─── System prompt for real Claude calls ──────────────────────── */
+const SYSTEM_PROMPT = [
+  "You are Benny's personal life assistant — proactive, practical, and genuinely helpful across all areas of his life.",
+  "Today is " + TODAY_LABEL + ".",
+  "",
+  "You help with anything that makes Benny's life better: scheduling and time management, fitness and workout programming,",
+  "nutrition and meal planning, grocery and shopping lists, habit building, goal setting, life organization,",
+  "travel planning, productivity, relationships, finances, and general advice. There is no topic that is outside your scope.",
+  "If Benny asks for help with something, help him — don't deflect or suggest he ask someone else.",
+  "",
+  "Benny's actual current schedule is appended after this system prompt, under a CURRENT SCHEDULE heading — always check it before answering questions about his day/week, adding something that might duplicate an existing entry, or removing something by title.",
+  "",
+  "RESPONSE STYLE:",
+  "- Keep responses short and conversational. 1-4 sentences for simple questions. Never over-explain.",
+  "- For lists (workouts, meals, shopping), use bullet points with • character. Keep each item concise.",
+  "- For structured plans, use short ALL-CAPS section headers (e.g. MONDAY, BREAKFAST, PROTEIN).",
+  "- Never use asterisks (* or **) for anything. No markdown bold, no markdown bullets.",
+  "- No filler phrases like 'Great question!' or 'Certainly!' Just answer directly.",
+  "- Warm and human, but brief. If a plan needs detail, present it cleanly with headers and bullets.",
+  "- Never tell Benny something is outside your wheelhouse.",
+  "",
+  "ADDING TO THE SCHEDULE:",
+  "- You CAN actually add events to Benny's schedule now (this changed — you're not limited to viewing it), including multi-day and multi-week plans in a single response — not just one event at a time.",
+  "- When Benny asks you to add, schedule, or block time for something AND gives (or you can reasonably infer) a specific time, confirm it in your normal conversational reply, then output one machine-readable directive line PER EVENT — Benny will not see these raw lines, the app strips them and shows a single confirm button instead:",
+  "  ADD_EVENT: <Title> | <YYYY-MM-DD> | <start HH:MM>-<end HH:MM> | <type> | <task1; task2; task3>",
+  "  - YYYY-MM-DD is the calendar date. HH:MM is 24-hour time. <type> is exactly one of: work, personal, social, travel, free, health (pick the closest fit).",
+  "  - The last field is an optional semicolon-separated list of prep steps/action items for that specific block (e.g. 'Fill water bottle; Stretch before running'). Always include the trailing '|' even when there are no tasks — just leave it blank.",
+  "  - Example, single event with one task: ADD_EVENT: Call with Tim | " + TODAY_KEY + " | 22:00-22:30 | work | ",
+  "  - Example, single event with tasks: ADD_EVENT: Store Run | " + TODAY_KEY + " | 18:00-18:20 | personal | Peanut butter",
+  "- For anything that spans more than one day — a training plan, a trip itinerary, a habit Benny wants to build over weeks — output ONE ADD_EVENT line per day/session instead of a single event. Use today's date (" + TODAY_KEY + ") as your anchor and compute real forward calendar dates (e.g. 'a month from today' runs " + addDaysKey(TODAY_KEY, 1) + " through " + addDaysKey(TODAY_KEY, 30) + "). Give each occurrence its own sensible inline task list. Use good judgment on rest/off days — don't force an identical block onto every single day if the plan wouldn't realistically call for that.",
+  "  Example (3-day excerpt of a 5K training plan, race in a month):",
+  "  ADD_EVENT: 5K Training Run | " + addDaysKey(TODAY_KEY, 1) + " | 06:30-07:15 | health | Stretch before running; Fill water bottle; Log distance after",
+  "  ADD_EVENT: Rest / Mobility Day | " + addDaysKey(TODAY_KEY, 2) + " | 06:30-07:00 | health | Foam roll; Light stretching",
+  "  ADD_EVENT: 5K Training Run | " + addDaysKey(TODAY_KEY, 3) + " | 06:30-07:15 | health | Stretch before running; Fill water bottle; Log distance after",
+  "- Keep a consistent time of day across a multi-day plan (don't scatter times randomly) unless Benny specifically asked for varied timing, and keep titles short and readable.",
+  "- If Benny hasn't given a time (or a rough daily time for a multi-day plan) and none is implied, ask instead of guessing — do not output any ADD_EVENT line in that case.",
+  "",
+  "REMOVING FROM THE SCHEDULE:",
+  "- You CAN actually cancel/remove/delete things from Benny's schedule too, not just add them — never tell him he has to do it himself.",
+  "- Only ever remove something that's actually listed under CURRENT SCHEDULE (appended after this prompt). If Benny asks to cancel something you don't see there, say you don't see it on the schedule instead of guessing or inventing a directive for it.",
+  "- Confirm conversationally, then output one directive line PER matching event:",
+  "  REMOVE_EVENT: <exact title as shown in CURRENT SCHEDULE> | <YYYY-MM-DD>",
+  "  To cancel every occurrence of a recurring or multi-day plan at once (e.g. Benny wants the whole training block gone, not just one day), use ALL instead of a date: REMOVE_EVENT: <exact title> | ALL",
+  "- Use the exact title text from CURRENT SCHEDULE, not a paraphrase — it's matched programmatically, not by you.",
+  "- If it's ambiguous which one he means (e.g. two different entries with similar titles, or he says 'cancel my run' when several exist on different days), ask which one instead of guessing ALL vs. a specific date.",
+  "",
+  "PROPOSING QUICK-PICK OPTIONS:",
+  "- This overrides the general 'use bullets for lists' rule above, and applies any time you'd otherwise ask Benny an open-ended question that actually has a small set of sensible answers — not just time windows. Examples: what time works best, how long a session should be, how many days a week, which of a few plan variants he wants, how long a plan should run, whether to keep a recurring pattern going and for how long. In all of these, do NOT just pick one option yourself and ask a yes/no question about it, and do NOT write the candidate options as a bulleted (•) list or bury them inline in a sentence. The app renders them as tappable buttons instead, so listing them as text yourself would just duplicate them on screen — and if you skip the directive entirely, Benny is left with a question he has no way to tap an answer to at all.",
+  "- ABSOLUTE HARD RULE, self-check before every send: if your reply ends in a question that asks Benny to pick one of a small set of things (2-5 options), it is INVALID unless it ends with a QUICK_OPTIONS line — the two always go together, no exceptions. This applies even inside a compound reply that confirms something else first (e.g. confirming a start date, then asking about duration in the same message) — the part of the reply that's asking him to choose still needs the directive, regardless of what else is in that reply. Before you send anything, silently check: 'Does this reply ask Benny to choose between a few things?' If yes and there's no QUICK_OPTIONS line at the end, you are about to send a broken reply — stop and add the line before sending. Never send the question first and plan to add options 'next time' — by then Benny has already had to type a free-text guess at what you meant, which is exactly the failure mode this rule exists to prevent.",
+  "- Concretely broken examples — never send anything shaped like these:",
+  "  'How long — 20 or 30 minutes?' (choices listed inline, no directive at all)",
+  "  'Every day starting tomorrow? And for how long — just next week, two weeks, a month?' (a compound question; the second half asks him to pick one of three things and still needs its own QUICK_OPTIONS line even though the first half was a plain yes/no)",
+  "  'Want me to add them for just this week, or a few weeks out?' with nothing following it",
+  "- Shape of the reply, every time: (1) name the choices in ONE short sentence of plain prose, no bullets — e.g. 'You've got a good gap before your commute and another after dinner.' (2) ask a short open question, e.g. 'Which works better for you?' — never phrase it as yes/no about a single option, and never list the choices inline either (not 'How long — 20 or 30 minutes?', just 'How long do you want each session?'). (3) on its own final line, the required directive:",
+  "  QUICK_OPTIONS: <choice>; <choice>; <choice>",
+  "  Keep each choice short and readable (e.g. 7:45-8:30am, or 20 minutes, or 3 days a week). List 2-5 realistic options, most sensible first — don't overwhelm him with too many.",
+  "- Full example (time window) — Benny asks 'when should I practice guitar every day', your ENTIRE reply: 'You've got a solid gap before your commute, plus your evening wind-down after dinner — either works well for a daily habit. Which fits your routine better?\\nQUICK_OPTIONS: 7:45-8:30am; 7:15-8:30pm'",
+  "  Full example (duration) — you need to know session length before finalizing a plan, your ENTIRE reply: 'How long do you want each practice session to be?\\nQUICK_OPTIONS: 20 minutes; 30 minutes; 45 minutes'",
+  "  Full example (compound reply — the first half is settled, only the second half is a real choice) — your ENTIRE reply: 'Got it, I will add work blocks Monday through Friday starting tomorrow. Want me to add them for just this week, or a few weeks out?\\nQUICK_OPTIONS: Just this week; 2 weeks; 4 weeks'",
+  "- Once Benny replies picking one, treat that as the answer and proceed normally — for a time window that usually means asking for or confirming a duration next, then adding it with ADD_EVENT as described above.",
+  "- Skip this whole mechanism if he already gave the answer, or if you're just stating one choice you're about to use rather than asking him to pick.",
+  "- Benny's schedule is often completely blank (he's a new user), so there usually won't be existing free/busy windows to check against for a time-window question specifically. That's not a reason to skip the mechanism — fall back to generic daypart options instead of specific windows, e.g.: QUICK_OPTIONS: Early morning (6-8am); Midday; Evening (6-8pm)",
+  "",
+  "LINKING ACTION ITEMS TO EXISTING SCHEDULE ITEMS:",
+  "- This is for to-dos tied to something ALREADY on today's schedule — not a new event you're adding right now. For a new event's own prep steps, use that event's inline task list on its ADD_EVENT line instead (see above); don't also duplicate them here.",
+  "- Whenever Benny mentions concrete to-dos, errands, prep steps, or things to pick up/get/bring for an existing event — whether it's a long list or a single item — put them in your reply as a bulleted (•) list. Never fold a concrete item into a plain sentence instead (e.g. don't just say 'Got it, I'll block that for you!' when Benny said he needs peanut butter for something already on the schedule — list 'peanut butter' as its own • line so it becomes a real checkable item).",
+  "- Tell the app which part of Benny's day the list belongs to so it lands on the right card instead of a generic pile: add one final line:",
+  "  ADD_TASKS_FOR: <exact event title>",
+  "  Use the exact title as it appears in today's schedule above. If the list genuinely isn't tied to any specific event on the schedule, use: ADD_TASKS_FOR: general",
+  "  Example: ADD_TASKS_FOR: Dinner with Family",
+  "- Don't invent a title that isn't on the schedule — pick the closest real match, or fall back to general.",
+  "- Skip the ADD_TASKS_FOR line entirely if your reply has no bulleted list, or if the tasks already went on an ADD_EVENT line instead.",
+].join("\n");
+
+/* ─── Demo responses (keyword-matched) ─────────────────────────── */
+const DEMO = {
+  schedule: TODAY.length ? [
+    "Here's your full day, Benny ❆",
+    "",
+    ...TODAY.map(e => e.emoji + "  " + e.title + "  ·  " + e.start + "–" + e.end),
+  ].join("\n") : "Your schedule's completely open right now, Benny ❆\n\nTell me what you're working on and I can start blocking out time for it.",
+
+  free: [
+    "Your whole day's open right now, Benny — nothing on the books yet ❆",
+    "",
+    "Tell me what you want to fit in and I can block out real time for it.",
+  ].join("\n"),
+
+  fitness: [
+    "Let's get you jacked, Benny",
+    "",
+    "Here's a 12-week Push/Pull/Legs hypertrophy program — let me know your usual workout time and I'll block it into your schedule:",
+    "",
+    "MON — Push (Chest, Shoulders, Tris)",
+    "  Bench Press         4×8",
+    "  Overhead Press      3×10",
+    "  Incline DB Press    3×10",
+    "  Lateral Raises      3×15",
+    "  Tricep Pushdowns    3×12",
+    "",
+    "WED — Pull (Back, Biceps)",
+    "  Deadlift            4×6",
+    "  Barbell Rows        4×8",
+    "  Pull-ups            3×max",
+    "  Face Pulls          3×15",
+    "  Barbell Curls       3×10",
+    "",
+    "FRI — Legs (Quads, Hams, Glutes)",
+    "  Squats              4×8",
+    "  Romanian Deadlifts  3×10",
+    "  Leg Press           3×12",
+    "  Leg Curls           3×12",
+    "  Calf Raises         4×15",
+    "",
+    "NUTRITION TARGETS",
+    "  Calories: ~2,900/day",
+    "  Protein: 185g  ·  Carbs: 330g  ·  Fat: 80g",
+    "",
+    "Want me to generate the meal plan and shopping list too?",
+  ].join("\n"),
+
+  meal: [
+    "High-protein meal plan to match your training goals:",
+    "",
+    "BREAKFAST  —  ~530 cal  ·  45g protein",
+    "  4 scrambled eggs + 2 turkey sausages",
+    "  1 cup oatmeal with mixed berries",
+    "  Black coffee",
+    "",
+    "LUNCH  —  ~620 cal  ·  55g protein",
+    "  200g grilled chicken breast",
+    "  1 cup brown rice + roasted veggies",
+    "  Greek yogurt (snack, ~30 min later)",
+    "",
+    "PRE-WORKOUT  —  ~200 cal",
+    "  Banana + 1 scoop whey protein",
+    "",
+    "DINNER  —  ~700 cal  ·  50g protein",
+    "  250g salmon or lean ground beef",
+    "  Sweet potato + leafy greens",
+    "  Drizzle of olive oil",
+    "",
+    "EVENING  —  ~150 cal  ·  25g protein",
+    "  Cottage cheese or casein shake",
+    "",
+    "Want me to build the shopping list for this week?",
+  ].join("\n"),
+
+  shopping: [
+    "Here's your grocery list",
+    "",
+    "PROTEIN",
+    "  • Chicken breast  2 lbs",
+    "  • Salmon fillets  1 lb",
+    "  • Lean ground beef  1 lb",
+    "  • Eggs  2 dozen",
+    "  • Turkey sausage  1 pack",
+    "  • Whey protein powder",
+    "  • Cottage cheese  2 containers",
+    "  • Greek yogurt  6-pack",
+    "",
+    "CARBS & PRODUCE",
+    "  • Brown rice  2 lb bag",
+    "  • Sweet potatoes  4",
+    "  • Rolled oats  large container",
+    "  • Bananas  bunch",
+    "  • Mixed berries  (frozen bag)",
+    "  • Broccoli + zucchini",
+    "  • Baby spinach  large bag",
+    "",
+    "FATS & MISC",
+    "  • Olive oil",
+    "  • Avocados  4",
+    "  • Almonds  small bag",
+    "  • Coffee beans",
+  ].join("\n"),
+
+  add: "Done ❆ I've added that to your schedule. Head to the Calendar to see it on the grid.\n\nWant me to add any prep time or a reminder around it?",
+
+  fallback: "I can help with your schedule, free time, workout plans, meal plans, and shopping lists. Try asking:\n\n• \"What's my schedule today?\"\n• \"When am I free?\"\n• \"Build me a workout plan\"\n• \"Generate a grocery list\"",
+};
+
+function getDemoResponse(text) {
+  const t = (text || '').toLowerCase();
+  if (t.match(/schedule|today|what.s on|my day|what do i have|upcoming/)) {
+    return { text: DEMO.schedule, actions: [] };
+  }
+  if (t.match(/free|available|open|gap|window|when can/)) {
+    return { text: DEMO.free, actions: [] };
+  }
+  if (t.match(/jacked|muscle|bulk|hypertrophy|lift|strength|gains|workout plan|training plan|get fit|get strong/)) {
+    return { text: DEMO.fitness, actions: ['Generate meal plan', 'Build shopping list', 'Add gym sessions to calendar'] };
+  }
+  if (t.match(/meal plan|nutrition plan|diet|eating plan|food plan|macros|what (should i|to) eat/)) {
+    return { text: DEMO.meal, actions: ['Build shopping list'] };
+  }
+  if (t.match(/shop|grocer|grocery|buy|ingredient|list|prep.*list/)) {
+    return { text: DEMO.shopping, actions: ['Save to action page'] };
+  }
+  if (t.match(/add|create|schedule.*event|put.*calendar|block.*time|remind/)) {
+    return { text: DEMO.add, actions: [] };
+  }
+  return { text: DEMO.fallback, actions: [] };
+}
+
+/* ─── Claude API call (proxied through local server) ────────────── */
+// Shared low-level call into the /api/chat proxy — callClaude (the main
+// reply) and judgeConflict (the automatic conflict-resolution follow-up)
+// both just need "these messages, this system prompt, this token budget"
+// and don't otherwise differ, so the request-building only lives here once.
+async function postChat(messages, maxTokens, systemPrompt) {
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: messages.map(function(m) { return { role: m.role, content: m.content }; }),
+    }),
+  });
+  if (!res.ok) throw new Error('status ' + res.status);
+  const data = await res.json();
+  return data.content[0].text;
+}
+
+async function callClaude(history) {
+  try {
+    // Loaded once and threaded through buildScheduleContext/resolveRemovals/
+    // findConflicts below — nothing in this function writes to the
+    // database, so one fetch covers all three.
+    const botEvents = await Cal.loadEvents();
+    // Appended fresh per request (not baked into the static SYSTEM_PROMPT)
+    // so Claude always sees Benny's real current schedule — required for
+    // REMOVE_EVENT to resolve against something real instead of guessing
+    // blind. Also handed back below so judgeConflict's follow-up call (if
+    // any) can reuse it instead of rebuilding it a second time this turn.
+    const scheduleContext = buildScheduleContext(botEvents);
+    // Multi-week plans can carry a couple dozen ADD_EVENT directive lines
+    // plus prose — 1024 was cutting responses off mid-event (dropping
+    // events, e.g. a race day, and leaking a raw partial ADD_EVENT: line
+    // into the visible reply). 4096 gives enough headroom for a full month
+    // of daily events.
+    const raw = await postChat(history, 4096, SYSTEM_PROMPT + '\n\n' + scheduleContext);
+    const { events, cleanText: afterEvents } = parseAddEvents(raw);
+    const { removals, cleanText: afterRemovals } = parseRemoveEvents(afterEvents);
+    const { eventTitleHint, cleanText: afterTasks } = parseTasksFor(afterRemovals);
+    const { quickOptions: directiveOptions, cleanText: afterQuickDirective } = parseQuickOptions(afterTasks);
+    const bulletFallback = directiveOptions.length ? null : extractBulletTimeOptions(afterQuickDirective);
+    const quickOptions = directiveOptions.length ? directiveOptions : bulletFallback.quickOptions;
+    const cleanText = bulletFallback && bulletFallback.quickOptions.length ? bulletFallback.cleanText : afterQuickDirective;
+    // Resolved now (against the schedule as of this response) rather than
+    // at click time, so the button label's count is accurate and clicking
+    // later can't pick up unrelated events added/removed in the meantime.
+    const removalIds = resolveRemovals(removals, botEvents);
+    // Deterministic, not left to the model to notice — see findConflicts above.
+    const conflicts = findConflicts(events, removalIds, botEvents);
+    const actions = extractBulletItems(cleanText).length ? ['Save to action page'] : [];
+    // One-off event → "Add event"; a multi-day/multi-event plan → "Create
+    // plan" (it's building out a whole program, not just one appointment).
+    if (events.length === 1) actions.push('Add event');
+    else if (events.length > 1) actions.push('Create plan');
+    if (removalIds.length === 1) actions.push('Remove event');
+    else if (removalIds.length > 1) actions.push('Remove ' + removalIds.length + ' events');
+    return { text: cleanText, actions: actions, events: events, taskEventHint: eventTitleHint, quickOptions: quickOptions, removalIds: removalIds, conflicts: conflicts, scheduleContext: scheduleContext };
+  } catch(e) {
+    console.warn('Claude API error, falling back to demo:', e.message);
+    return getDemoResponse(history[history.length - 1].content);
+  }
+}
+
+/* ─── Conflict resolution — judged by Claude, not just flagged ──────
+   findConflicts() above guarantees a conflict is always detected; this
+   is what happens next. Rather than a flat "these overlap" notice,
+   fires an automatic follow-up turn asking Claude to weigh which event
+   seems harder to move and propose a concrete fix (almost always
+   shifting the more flexible one), phrased naturally and offered as
+   real QUICK_OPTIONS choices — same mechanism the rest of the app
+   already uses for "which of these works?" questions, just triggered
+   by code instead of waiting on the model to bring it up unprompted.
+   Only ever called when the main callClaude() call above already
+   succeeded (conflicts can only be non-empty on that path — a failed
+   call falls back to getDemoResponse, which never produces events/
+   conflicts at all), so a live API is already known to be reachable;
+   the try/catch here only guards a second call failing independently. */
+function buildConflictNudge(conflicts) {
+  var lines = conflicts.map(function(c) {
+    var dateLabel = new Date(c.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    return '- "' + c.eventTitle + '" (' + fmtT12(c.eventStart) + '–' + fmtT12(c.eventEnd) + ') overlaps "' + c.otherTitle + '" (' + fmtT12(c.otherStart) + '–' + fmtT12(c.otherEnd) + ') on ' + dateLabel;
+  });
+  return [
+    "One more thing before we move on — the event(s) you just proposed create a real scheduling conflict, caught automatically:",
+    lines.join('\n'),
+    '',
+    "Use your own judgment on which one seems more important or harder to move — a work meeting or something involving other people usually can't shift as easily as a personal workout, errand, or free block — then suggest ONE practical fix, almost always shifting the more flexible one a bit earlier or later so both fit. Say it in ONE short, warm, conversational sentence, the way you'd actually mention it — for example: \"Looks like your gym session overlaps your 2pm meeting — want to shift the gym a bit earlier so both fit?\" Do not use ADD_EVENT or REMOVE_EVENT in this reply, just propose it — end with a QUICK_OPTIONS line offering 2-3 concrete choices (specific new times for the move, and always include \"Keep both as scheduled\" as a fallback). Only make the actual change once Benny picks one.",
+  ].join('\n');
+}
+
+async function judgeConflict(conflicts, historySoFar, scheduleContext) {
+  try {
+    var nudgeHistory = historySoFar.concat([{ role: 'user', content: buildConflictNudge(conflicts) }]);
+    const raw = await postChat(nudgeHistory, 400, SYSTEM_PROMPT + '\n\n' + scheduleContext);
+    // Defensive: strip ADD_EVENT/REMOVE_EVENT the same way the main
+    // pipeline does, in case Claude ignores the "don't use those here"
+    // instruction and emits one anyway — better to strip it than leak
+    // raw directive syntax into the visible reply.
+    const { cleanText: afterEvents } = parseAddEvents(raw);
+    const { cleanText: afterRemovals } = parseRemoveEvents(afterEvents);
+    const { quickOptions, cleanText } = parseQuickOptions(afterRemovals);
+    return { text: cleanText, quickOptions: quickOptions };
+  } catch(e) {
+    console.warn('Conflict-resolution follow-up failed, falling back to a plain notice:', e.message);
+    var c = conflicts[0];
+    return {
+      text: '"' + c.eventTitle + '" overlaps "' + c.otherTitle + '" on ' + c.date + '. Want me to move one of them?',
+      quickOptions: ['Keep both as scheduled'],
+    };
+  }
+}
+
+/* ─── Voice output — text-to-speech, British voice preferred ────────
+   Web Speech API (SpeechSynthesis), entirely client-side — no server
+   changes needed. Warms up the browser's voice list at module load,
+   since Chrome in particular returns an empty list from getVoices()
+   until the async 'voiceschanged' event has fired once; by the time the
+   first reply actually lands, the list is normally populated. */
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = function() {};
+}
+
+const VOICE_ENABLED_KEY = 'cal_bot_voice_enabled';
+function loadVoiceEnabled() {
+  try {
+    var raw = localStorage.getItem(VOICE_ENABLED_KEY);
+    return raw === null ? true : raw === 'true';
+  } catch(e) { return true; }
+}
+function saveVoiceEnabled(v) {
+  try { localStorage.setItem(VOICE_ENABLED_KEY, v ? 'true' : 'false'); } catch(e) {}
+}
+
+/* Prefers a real en-GB voice; within those, ranks by how natural the
+   voice actually sounds rather than just "is it named." Most platforms
+   expose several quality tiers under the same language: a legacy compact
+   voice (small, fast, robotic-sounding — think old-school screen-reader
+   cadence) alongside a much better-sounding one:
+     - macOS/iOS Safari mark their good ones "(Enhanced)" or "(Premium)"
+     - Edge exposes "... Online (Natural)" neural voices
+     - Chrome's own "Google UK English Female/Male" are cloud-synthesized
+       and sound noticeably less robotic than a bare OS default
+   "Daniel"/"Arthur" (checked last) are real named voices but on several
+   platforms are the plain compact tier, not the enhanced one — better
+   than an unnamed default, but the tiers above sound better when present.
+   Falls back to just setting lang: 'en-GB' on the utterance with no
+   explicit voice if the browser has no British voice installed at all —
+   most desktop/mobile platforms ship at least one, but this keeps speech
+   working (in whatever accent is available) rather than silently doing
+   nothing on a machine without one. */
+function pickBritishVoice() {
+  if (!('speechSynthesis' in window)) return null;
+  var voices = speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  var gb = voices.filter(function(v) { return v.lang === 'en-GB'; });
+  if (!gb.length) return null;
+  var qualityTiers = [
+    /enhanced|premium|natural|neural/i,
+    /Google UK/i,
+    /Daniel|Arthur/i,
+  ];
+  for (var i = 0; i < qualityTiers.length; i++) {
+    var match = gb.find(function(v) { return qualityTiers[i].test(v.name); });
+    if (match) return match;
+  }
+  return gb[0];
+}
+
+/* Strips markup the assistant's replies use (bullets, blank-line-as-
+   paragraph-break, ALL-CAPS section headers) that would otherwise be
+   read aloud as literal symbols, long silences, or — for ALL-CAPS —
+   a shouted/spelled-out-sounding line. */
+function cleanForSpeech(text) {
+  var lines = (text || '').split('\n').map(function(line) {
+    // Same ALL-CAPS-section-header check renderText uses to style these
+    // as headers visually — they're formatting, not meant to be heard
+    // shouted, so read them as an ordinary sentence instead.
+    var letters = line.replace(/[^A-Za-z]/g, '');
+    if (letters.length > 2 && letters === letters.toUpperCase()) {
+      return line.charAt(0) + line.slice(1).toLowerCase();
+    }
+    return line;
+  });
+  return lines.join('\n')
+    .replace(/•/g, '')
+    .replace(/\n{2,}/g, '. ')
+    .replace(/\n/g, '. ')
+    // A line already ending in its own punctuation (". \n\n" etc.) would
+    // otherwise pick up a second one from the replacements above.
+    .replace(/([.!?])\s*\.+/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function speakText(text) {
+  if (!('speechSynthesis' in window)) return;
+  var clean = cleanForSpeech(text);
+  if (!clean) return;
+  function doSpeak() {
+    var utter = new SpeechSynthesisUtterance(clean);
+    var voice = pickBritishVoice();
+    if (voice) { utter.voice = voice; utter.lang = voice.lang; }
+    else { utter.lang = 'en-GB'; }
+    // A hair slower than the engine default (1.0) reads noticeably less
+    // clipped/robotic — full speed tends to run sentences together with
+    // no breathing room. Pitch deliberately left at the engine default:
+    // nudging it either way is what actually makes a voice sound
+    // synthetic, since it's tuned for that specific voice's natural range.
+    utter.rate = 0.95;
+    speechSynthesis.speak(utter);
+  }
+  // Chrome has a well-known race where calling speak() immediately after
+  // cancel() in the same tick doesn't reliably work — the new utterance
+  // can silently sit unstarted for several seconds (sometimes indefinitely)
+  // before audio actually begins, instead of the two being sequenced
+  // properly. This was firing on every single reply, since cancel() was
+  // called unconditionally even when nothing was actually still playing.
+  // Only cancel (and give it a beat to actually land before queuing the
+  // next utterance) when something is genuinely in progress; otherwise
+  // speak immediately with no delay at all.
+  if (speechSynthesis.speaking || speechSynthesis.pending) {
+    speechSynthesis.cancel();
+    setTimeout(doSpeak, 150);
+  } else {
+    doSpeak();
+  }
+}
+
+/* ─── Voice input — speech-to-text, Web Speech API ───────────────────
+   Chrome/Edge/Safari (webkit-prefixed) only — no polyfill for Firefox,
+   which doesn't implement SpeechRecognition at all; MicButton below
+   feature-detects and renders nothing if unsupported rather than
+   showing a control that can't work. lang: 'en-GB' so British phrasing/
+   place names are recognized more accurately, matching the voice output. */
+function getSpeechRecognitionCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+/* ─── Nav ───────────────────────────────────────────────────────── */
+function Nav({ page }) {
+  const pages = [
+    { label: 'Today',    href: 'index.html',    key: 'today'    },
+    { label: 'Calendar', href: 'calendar.html', key: 'calendar' },
+    { label: 'Action',   href: 'action.html',   key: 'action'   },
+    { label: '✦ Bot', href: 'bot.html',    key: 'bot'      },
+  ];
+  return (
+    <div style={{
+      display: 'flex', gap: 4, alignItems: 'center',
+      background: 'var(--surface-elevated)',
+      border: '1px solid var(--border)',
+      borderRadius: 24, padding: '5px 6px',
+      backdropFilter: 'blur(12px)',
+    }}>
+      {pages.map(function(p) {
+        return (
+          <a key={p.key} href={p.href} style={{
+            padding: '6px 16px', borderRadius: 20,
+            fontSize: 13, fontWeight: 500,
+            textDecoration: 'none',
+            background: p.key === page ? 'color-mix(in srgb, var(--accent-primary) 18%, transparent)' : 'transparent',
+            color: p.key === page ? 'var(--accent-hover)' : 'var(--text-secondary)',
+            border: p.key === page ? '1px solid color-mix(in srgb, var(--accent-primary) 28%, transparent)' : '1px solid transparent',
+            transition: 'all 0.15s ease',
+          }}>{p.label}</a>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ─── Settings gear ──────────────────────────────────────────────── */
+function SettingsGear() {
+  return (
+    <a href="settings.html" title="Settings" style={{
+      width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--surface-elevated)',
+      border: '2px solid var(--border)',
+      color: 'var(--text-secondary)', fontSize: 26, fontWeight: 600,
+      textDecoration: 'none',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 2px 10px color-mix(in srgb, var(--text-primary) 8%, transparent)',
+    }}><span style={{ display: 'inline-block', transform: 'translateY(-2px)' }}>⚙</span></a>
+  );
+}
+
+/* ─── Voice-reply toggle — mutes/unmutes the assistant reading its
+   replies aloud (see speakText above). Defaults on (loadVoiceEnabled),
+   persisted so muting sticks across reloads. ── */
+function VoiceToggleButton({ enabled, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={enabled ? 'Voice replies on — tap to mute' : 'Voice replies off — tap to unmute'}
+      style={{
+        width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: enabled ? 'color-mix(in srgb, var(--accent-primary) 16%, transparent)' : 'var(--surface-elevated)',
+        border: '1px solid ' + (enabled ? 'color-mix(in srgb, var(--accent-primary) 32%, transparent)' : 'var(--border)'),
+        color: enabled ? 'var(--accent-hover)' : 'var(--text-muted)',
+        cursor: 'pointer', backdropFilter: 'blur(8px)',
+        transition: 'all 0.15s ease',
+      }}
+    ><SpeakerIcon muted={!enabled} /></button>
+  );
+}
+
+/* ─── Bot icon set — all line-art SVG, no emoji ─────────────────── */
+
+/* Idle — happy robot face. */
+function RobotIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <line x1="12" y1="2.3" x2="12" y2="5" stroke="white" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="12" cy="2" r="1.1" fill="white" />
+      <rect x="4.5" y="5" width="15" height="13" rx="4" stroke="white" strokeWidth="1.6" />
+      <line x1="1.8" y1="9.5" x2="4.5" y2="9.5" stroke="white" strokeWidth="1.6" strokeLinecap="round" />
+      <line x1="19.5" y1="9.5" x2="22.2" y2="9.5" stroke="white" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="9" cy="11" r="1.3" fill="white" />
+      <circle cx="15" cy="11" r="1.3" fill="white" />
+      <path d="M9 14.3c1 1.3 5 1.3 6 0" stroke="white" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
+/* Thinking — simplified brain outline (two lobes + center seam + fold marks). */
+function BrainIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <path d="M12 5.2c-0.9-1.3-2.7-1.9-4.2-1.3-1.3.5-2.1 1.7-2.1 3 -1.3.4-2.2 1.6-2.2 3 0 .9.4 1.7 1 2.3 -.4.5-.6 1.2-.6 1.9 0 1.8 1.5 3.2 3.3 3.2 .3 0 .6 0 .9-.1 .5 1 1.5 1.6 2.7 1.6h1.2"
+        stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 5.2c0.9-1.3 2.7-1.9 4.2-1.3 1.3.5 2.1 1.7 2.1 3 1.3.4 2.2 1.6 2.2 3 0 .9-.4 1.7-1 2.3 .4.5.6 1.2.6 1.9 0 1.8-1.5 3.2-3.3 3.2 -.3 0-.6 0-.9-.1 -.5 1-1.5 1.6-2.7 1.6h-1.2"
+        stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="12" y1="5.2" x2="12" y2="18.8" stroke="white" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M6.3 9.3c.7.3 1.5.1 2-.4" stroke="white" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+      <path d="M17.7 9.3c-.7.3-1.5.1-2-.4" stroke="white" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+      <path d="M6.8 13.7c.6.35 1.35.3 1.9-.1" stroke="white" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+      <path d="M17.2 13.7c-.6.35-1.35.3-1.9-.1" stroke="white" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
+/* ─── Calendar-filling icon — small animated SVG (a day-cell "lights up"
+   in sequence, same stagger pattern as the typing dots below) used for
+   the "scheduling" phase of BotStatus instead of a static emoji. ── */
+function CalendarFillIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="5" width="18" height="16" rx="2.5" stroke="white" strokeWidth="1.6" />
+      <line x1="3" y1="9.5" x2="21" y2="9.5" stroke="white" strokeWidth="1.6" />
+      <line x1="7.5" y1="2.5" x2="7.5" y2="6" stroke="white" strokeWidth="1.6" strokeLinecap="round" />
+      <line x1="16.5" y1="2.5" x2="16.5" y2="6" stroke="white" strokeWidth="1.6" strokeLinecap="round" />
+      <rect className="cal-cell1" x="6.3" y="12.5" width="3.4" height="3.4" rx="0.8" fill="white" />
+      <rect className="cal-cell2" x="10.3" y="12.5" width="3.4" height="3.4" rx="0.8" fill="white" />
+      <rect className="cal-cell3" x="14.3" y="12.5" width="3.4" height="3.4" rx="0.8" fill="white" />
+    </svg>
+  );
+}
+
+/* Microphone glyph for MicButton — uses currentColor so it follows the
+   button's own idle/listening color instead of needing separate art. */
+function MicIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" fill="none" />
+      <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* Speaker glyph for the voice-reply toggle — a crossed-out variant when
+   muted, both sharing the same base speaker shape via currentColor. */
+function SpeakerIcon({ muted }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M4 9v6h4l5 4V5L8 9H4z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" fill="none" />
+      {!muted && <path d="M16.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />}
+      {!muted && <path d="M19 6a9 9 0 0 1 0 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />}
+      {muted && <line x1="15.5" y1="8" x2="21" y2="16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />}
+      {muted && <line x1="21" y1="8" x2="15.5" y2="16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />}
+    </svg>
+  );
+}
+
+/* ─── Live status indicator — brain while it's "thinking" (just sent,
+   request in flight), an animated calendar being filled out once it
+   switches to "scheduling" the reply. No real token streaming here, so
+   the split is simulated on a timer: thinking for the first ~900ms,
+   scheduling for however much longer the API call takes. Resets fresh
+   every time this mounts (i.e. every time `loading` flips true), since
+   it's only rendered while loading. ── */
+function BotStatus() {
+  const [phase, setPhase] = useState('thinking');
+  useEffect(() => {
+    const id = setTimeout(function() { setPhase('scheduling'); }, 900);
+    return function() { clearTimeout(id); };
+  }, []);
+  const icon = phase === 'thinking' ? <BrainIcon /> : <CalendarFillIcon />;
+  const dot = {
+    width: 7, height: 7, borderRadius: '50%',
+    background: 'color-mix(in srgb, var(--accent-primary) 55%, transparent)',
+    display: 'inline-block',
+  };
+  return (
+    <div className="msg-in" style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'flex-start' }}>
+      <div style={{
+        width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+        background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-hover))',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 15, color: 'white', fontWeight: 700,
+        boxShadow: '0 2px 10px color-mix(in srgb, var(--accent-primary) 38%, transparent)',
+      }}>{icon}</div>
+      <div style={{
+        background: 'var(--surface-elevated)',
+        border: '1px solid var(--border)',
+        borderRadius: '4px 20px 20px 20px',
+        padding: '14px 18px',
+        backdropFilter: 'blur(14px)',
+        display: 'flex', gap: 6, alignItems: 'center',
+        boxShadow: '0 2px 12px color-mix(in srgb, var(--text-primary) 7%, transparent)',
+      }}>
+        <div className="dot1" style={dot} />
+        <div className="dot2" style={dot} />
+        <div className="dot3" style={dot} />
+      </div>
+    </div>
+  );
+}
+
+/* ─── Action button ─────────────────────────────────────────────── */
+function ActionBtn({ label, onClick, done }) {
+  function handleClick() {
+    if (done) return;
+    onClick(label);
+  }
+  return (
+    <button
+      onClick={handleClick}
+      disabled={done}
+      style={{
+        padding: '6px 14px', borderRadius: 20,
+        border: '1px solid ' + (done ? 'color-mix(in srgb, var(--accent-primary) 15%, transparent)' : 'color-mix(in srgb, var(--accent-primary) 38%, transparent)'),
+        background: done ? 'color-mix(in srgb, var(--accent-primary) 8%, transparent)' : 'color-mix(in srgb, var(--surface) 72%, transparent)',
+        color: done ? 'var(--text-muted)' : 'var(--accent-hover)',
+        fontSize: 12.5, fontWeight: 500,
+        cursor: done ? 'default' : 'pointer',
+        backdropFilter: 'blur(8px)',
+        fontFamily: 'inherit',
+        transition: 'all 0.15s ease',
+      }}
+    >
+      {done ? '✓ ' + label : label}
+    </button>
+  );
+}
+
+/* ─── Quick-pick option button — mutually exclusive picks (radio-like)
+   for a "which of these works for you?"-style prompt (a time window, a
+   duration, any small set of choices), see QUICK_OPTIONS in
+   SYSTEM_PROMPT. `picked` is the option text the user already chose for
+   this message (or null); this button is the chosen one, another one,
+   or neither. */
+function QuickOptionBtn({ label, picked, onClick }) {
+  const isPicked = picked === label;
+  const disabled = !!picked;
+  return (
+    <button
+      onClick={function() { if (!disabled) onClick(label); }}
+      disabled={disabled}
+      style={{
+        padding: '7px 15px', borderRadius: 20,
+        border: '1px solid ' + (isPicked ? 'color-mix(in srgb, var(--accent-primary) 45%, transparent)' : disabled ? 'color-mix(in srgb, var(--accent-primary) 12%, transparent)' : 'color-mix(in srgb, var(--accent-primary) 32%, transparent)'),
+        background: isPicked ? 'color-mix(in srgb, var(--accent-primary) 16%, transparent)' : disabled ? 'color-mix(in srgb, var(--surface) 50%, transparent)' : 'var(--surface-elevated)',
+        color: isPicked ? 'var(--accent-hover)' : disabled ? 'var(--text-muted)' : 'var(--text-primary)',
+        fontSize: 13, fontWeight: isPicked ? 600 : 500,
+        cursor: disabled ? 'default' : 'pointer',
+        backdropFilter: 'blur(8px)',
+        fontFamily: 'inherit',
+        transition: 'all 0.15s ease',
+      }}
+    >
+      {isPicked ? '✓ ' + label : label}
+    </button>
+  );
+}
+
+/* ─── Text renderer (bullets, headers, indented items) ─────────── */
+function renderText(text) {
+  if (!text) return null;
+  var lines = text.split('\n');
+  return (
+    <div style={{ lineHeight: 1.7, fontSize: 13.5 }}>
+      {lines.map(function(line, i) {
+        if (line === '') {
+          return <div key={i} style={{ height: 5 }} />;
+        }
+        // Bullet line starting with • or -
+        if (line[0] === '•' || line.slice(0, 2) === '- ') {
+          var txt = line.slice(2);
+          return (
+            <div key={i} style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginBottom: 3 }}>
+              <span style={{ color: 'var(--accent-primary)', flexShrink: 0, fontWeight: 700, lineHeight: '1.7', fontSize: 12 }}>•</span>
+              <span style={{ color: 'var(--text-primary)' }}>{txt}</span>
+            </div>
+          );
+        }
+        // Indented item (2+ leading spaces)
+        if (line.slice(0, 2) === '  ' && line.trim() !== '') {
+          return (
+            <div key={i} style={{ paddingLeft: 18, color: 'var(--text-secondary)', fontSize: 13, marginBottom: 2, fontVariantNumeric: 'tabular-nums' }}>
+              {line.trim()}
+            </div>
+          );
+        }
+        // ALL-CAPS section header (has letters, no lowercase)
+        var letters = line.replace(/[^A-Za-z]/g, '');
+        if (letters.length > 2 && letters === letters.toUpperCase()) {
+          return (
+            <div key={i} style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.9px', color: 'var(--accent-primary)', marginTop: 14, marginBottom: 5, textTransform: 'uppercase' }}>
+              {line}
+            </div>
+          );
+        }
+        // Normal line
+        return <div key={i} style={{ marginBottom: 1, color: 'var(--text-primary)' }}>{line}</div>;
+      })}
+    </div>
+  );
+}
+
+/* ─── Single message bubble ─────────────────────────────────────── */
+function Message({ msg, onAction, onPickOption }) {
+  const isUser = msg.role === 'user';
+
+  if (isUser) {
+    return (
+      <div className="msg-in" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', gap: 10, marginBottom: 16 }}>
+        <div style={{
+          maxWidth: '72%',
+          background: 'linear-gradient(145deg, var(--accent-primary), var(--accent-hover))',
+          color: 'white',
+          borderRadius: '18px 18px 4px 18px',
+          padding: '12px 17px',
+          fontSize: 14, lineHeight: 1.55, fontWeight: 400,
+          boxShadow: '0 4px 20px color-mix(in srgb, var(--accent-primary) 32%, transparent), inset 0 1px 0 rgba(255,255,255,0.18)',
+          wordBreak: 'break-word',
+        }}>
+          {msg.content}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="msg-in" style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'flex-start' }}>
+      {/* Avatar — idle state once a reply has actually landed */}
+      <div style={{
+        width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+        background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-hover))',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: 'white', fontWeight: 700,
+        boxShadow: '0 2px 8px color-mix(in srgb, var(--accent-primary) 40%, transparent)',
+        marginTop: 3,
+      }}><RobotIcon /></div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Bubble */}
+        <div style={{
+          background: 'var(--surface-elevated)',
+          border: '1px solid color-mix(in srgb, var(--accent-primary) 18%, transparent)',
+          borderRadius: '4px 18px 18px 18px',
+          padding: '14px 18px',
+          backdropFilter: 'blur(18px)',
+          boxShadow: '0 2px 16px color-mix(in srgb, var(--text-primary) 8%, transparent), inset 0 1px 0 rgba(255,255,255,0.9)',
+          wordBreak: 'break-word',
+        }}>
+          {renderText(msg.content)}
+        </div>
+
+        {/* Quick-pick options — "which of these works for you?" picker */}
+        {msg.quickOptions && msg.quickOptions.length > 0 && (
+          <div style={{ display: 'flex', gap: 7, marginTop: 9, flexWrap: 'wrap' }}>
+            {msg.quickOptions.map(function(option, i) {
+              return <QuickOptionBtn key={i} label={option} picked={msg.pickedOption || null} onClick={function(label) { onPickOption(label, msg); }} />;
+            })}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        {msg.actions && msg.actions.length > 0 && (
+          <div style={{ display: 'flex', gap: 7, marginTop: 9, flexWrap: 'wrap' }}>
+            {msg.actions.map(function(action, i) {
+              const isDone = !!(msg.done && msg.done[action]);
+              return <ActionBtn key={i} label={action} done={isDone} onClick={function(label) { onAction(label, msg); }} />;
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Suggestion chips ──────────────────────────────────────────── */
+const SUGGESTIONS = [
+  "What's my schedule today?",
+  "When am I free this week?",
+  "I want to get jacked — build me a plan",
+  "Generate a grocery list",
+];
+
+function Suggestions({ onSelect }) {
+  return (
+    <div style={{ marginTop: 8, marginBottom: 4 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 10, letterSpacing: '0.3px', fontWeight: 500 }}>
+        TRY ASKING
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        {SUGGESTIONS.map(function(s, i) {
+          return (
+            <button
+              key={i}
+              onClick={function() { onSelect(s); }}
+              style={{
+                padding: '10px 16px',
+                borderRadius: 14,
+                border: '1px solid color-mix(in srgb, var(--accent-primary) 22%, transparent)',
+                background: 'var(--surface-elevated)',
+                color: 'var(--text-secondary)',
+                fontSize: 13.5, fontWeight: 400,
+                cursor: 'pointer',
+                backdropFilter: 'blur(8px)',
+                textAlign: 'left',
+                fontFamily: 'inherit',
+                transition: 'background 0.14s ease, border-color 0.14s ease',
+                lineHeight: 1.4,
+              }}
+            >
+              {s}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Mic button — press-to-talk voice input. Renders nothing if the
+   browser has no SpeechRecognition (feature-detected, no fallback UI —
+   see getSpeechRecognitionCtor above). Interim (not-yet-final) results
+   stream into the text input live so Benny can see it's actually
+   listening; the final result auto-sends, same as a real voice
+   assistant, rather than requiring a manual tap on send afterward.
+
+   continuous: true (was false) — with continuous off, the recognizer
+   auto-stopped the instant it detected ANY pause, including a completely
+   normal mid-sentence breath or "thinking" beat, which read as the mic
+   cutting Benny off. In continuous mode the recognizer keeps listening
+   across pauses and can report more than one finalized segment per
+   session, so finalizing/sending on the FIRST isFinal result (the old
+   approach) would cut off just as early — instead every finalized
+   segment is accumulated in finalChunksRef, and the accumulated text is
+   only sent once the session actually ends: either Benny taps the mic
+   again (stop() below) or the browser's own much more generous
+   continuous-mode silence timeout decides he's done. ── */
+function MicButton({ onFinalTranscript, onInterimTranscript, disabled }) {
+  const SR = getSpeechRecognitionCtor();
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
+  const finalChunksRef = useRef([]);
+
+  useEffect(function() {
+    if (!SR) return;
+    var recognition = new SR();
+    recognition.lang = 'en-GB';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = function(e) {
+      var interim = '';
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalChunksRef.current.push(e.results[i][0].transcript);
+        else interim += e.results[i][0].transcript;
+      }
+      onInterimTranscript((finalChunksRef.current.join(' ') + ' ' + interim).replace(/\s+/g, ' ').trim());
+    };
+    // The one place the accumulated transcript actually gets sent —
+    // fires whether the session ended via manual stop() or the browser's
+    // own silence detection, so both paths finalize the same way.
+    recognition.onend = function() {
+      setListening(false);
+      var finalText = finalChunksRef.current.join(' ').replace(/\s+/g, ' ').trim();
+      finalChunksRef.current = [];
+      if (finalText) onFinalTranscript(finalText);
+    };
+    recognition.onerror = function() { setListening(false); finalChunksRef.current = []; };
+    recognitionRef.current = recognition;
+    return function() {
+      recognition.onresult = null;
+      recognition.onend = null;
+      recognition.onerror = null;
+      try { recognition.stop(); } catch(e) {}
+    };
+  }, []);
+
+  if (!SR) return null;
+
+  function toggle() {
+    if (disabled) return;
+    if (listening) {
+      // setListening(false) and the actual send happen in onend once the
+      // recognizer flushes the last bit of speech into a final result —
+      // not here, so nothing said right before the tap gets dropped.
+      recognitionRef.current.stop();
+    } else {
+      // Don't talk over the assistant while listening for a new question.
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+      finalChunksRef.current = [];
+      try {
+        recognitionRef.current.start();
+        setListening(true);
+      } catch(e) {}
+    }
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      disabled={disabled}
+      title={listening ? 'Stop listening' : 'Speak to your assistant'}
+      style={{
+        width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+        background: listening
+          ? 'linear-gradient(135deg, #E8746B, #D6564C)'
+          : 'color-mix(in srgb, var(--surface) 70%, transparent)',
+        border: '1px solid ' + (listening ? 'transparent' : 'var(--border)'),
+        cursor: disabled ? 'default' : 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: listening ? 'white' : 'var(--text-secondary)',
+        boxShadow: listening ? '0 0 0 4px color-mix(in srgb, #E8746B 22%, transparent)' : 'none',
+        transition: 'all 0.15s ease',
+      }}
+    ><MicIcon /></button>
+  );
+}
+
+/* ─── App ───────────────────────────────────────────────────────── */
+const STORAGE_KEY = 'cal_bot_history';
+const GREETING = "Hey Benny! I'm your personal AI assistant ❆\n\nI can help with your schedule, fitness goals, meal planning, shopping lists, and anything else you want to get organised. What are we working on?";
+
+function loadHistory() {
+  try {
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch(e) {}
+  return [{ role: 'assistant', content: GREETING, actions: [] }];
+}
+
+/* ─── Loading screen — shown while the auth check is in flight. Chat
+   history itself stays in localStorage (see sql/schema.sql's "Not
+   migrated" note) so it's available instantly once past the auth
+   gate — only the guard itself needs a round trip. ── */
+function LoadingScreen() {
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '80px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+      Loading your assistant…
+    </div>
+  );
+}
+
+function App() {
+  const [ready, setReady] = useState(false);
+  const [messages, setMessages] = useState(loadHistory);
+  const [input,    setInput]    = useState('');
+  const [loading,  setLoading]  = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(loadVoiceEnabled);
+  const bottomRef = useRef(null);
+  const inputRef  = useRef(null);
+
+  useEffect(function() {
+    (async function() {
+      const session = await Cal.requireSession();
+      if (!session) return; // Cal.requireSession already redirected to login.html
+      setReady(true);
+    })();
+  }, []);
+
+  function toggleVoice() {
+    setVoiceEnabled(function(v) {
+      var next = !v;
+      saveVoiceEnabled(next);
+      if (!next && 'speechSynthesis' in window) speechSynthesis.cancel();
+      return next;
+    });
+  }
+
+  useEffect(function() {
+    if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  useEffect(function() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(messages)); } catch(e) {}
+  }, [messages]);
+
+  function clearHistory() {
+    var fresh = [{ role: 'assistant', content: GREETING, actions: [] }];
+    setMessages(fresh);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh)); } catch(e) {}
+  }
+
+  async function send(text) {
+    var trimmed = (text || '').trim();
+    if (!trimmed || loading) return;
+
+    var userMsg = { role: 'user', content: trimmed };
+    setMessages(function(prev) { return prev.concat([userMsg]); });
+    setInput('');
+    setLoading(true);
+    // Stop any reply still being read aloud rather than let it talk over
+    // the next one once it lands.
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+
+    var history = messages.concat([userMsg]).map(function(m) {
+      return { role: m.role, content: m.content };
+    });
+
+    var result = await callClaude(history);
+    var newMsgs = [{ role: 'assistant', content: result.text, actions: result.actions || [], events: result.events || [], taskEventHint: result.taskEventHint || null, quickOptions: result.quickOptions || [], removalIds: result.removalIds || [] }];
+
+    // A conflict is always caught (findConflicts, deterministic) — this is
+    // what happens next: an automatic follow-up turn asking Claude to judge
+    // which event matters more and propose a real fix, instead of just
+    // flatly noting the two overlap. Kept as a second bubble rather than
+    // folded into the first, same "one more thought" pattern a person
+    // typing a follow-up message would use.
+    if (result.conflicts && result.conflicts.length) {
+      var followUp = await judgeConflict(result.conflicts, history.concat([{ role: 'assistant', content: result.text }]), result.scheduleContext);
+      newMsgs.push({ role: 'assistant', content: followUp.text, actions: [], events: [], taskEventHint: null, quickOptions: followUp.quickOptions || [], removalIds: [] });
+    }
+
+    setMessages(function(prev) { return prev.concat(newMsgs); });
+    // Speak whichever bubble is most worth hearing — the conflict follow-up
+    // (an actual question needing an answer) when there is one, otherwise
+    // the normal reply.
+    if (voiceEnabled) speakText(newMsgs[newMsgs.length - 1].content);
+    setLoading(false);
+    setTimeout(function() { if (inputRef.current) inputRef.current.focus(); }, 60);
+  }
+
+  // Shared "find this exact message object and replace it with a patched
+  // clone" used by both markActionDone and markOptionPicked below — they
+  // only differ in which field they're patching.
+  function updateMessage(msg, patch) {
+    setMessages(function(prev) {
+      return prev.map(function(m) { return m === msg ? Object.assign({}, m, patch) : m; });
+    });
+  }
+
+  function markActionDone(msg, label) {
+    var done = Object.assign({}, msg.done);
+    done[label] = true;
+    updateMessage(msg, { done: done });
+  }
+
+  function markOptionPicked(msg, option) {
+    updateMessage(msg, { pickedOption: option });
+  }
+
+  function handlePickOption(option, msg) {
+    // Persisted on the message itself (like msg.done) so a reload can't
+    // un-pick it and let a different option be selected after the fact.
+    markOptionPicked(msg, option);
+    send(option);
+  }
+
+  async function handleAction(label, msg) {
+    // Mark done first (persisted with the message) so a reload can't
+    // present this button as fresh/clickable again and double-fire it.
+    markActionDone(msg, label);
+    if (label === 'Save to action page') {
+      // Prefer (in order): the single event just added in this same message
+      // (only when there's exactly one — a multi-day plan's own inline tasks
+      // already went on their ADD_EVENT lines, see Cal.saveEventTasks),
+      // Claude's own ADD_TASKS_FOR title hint (matched against Benny's real,
+      // freshly-loaded schedule), then saveToActionPage's own keyword
+      // fallback (matchEventId) if neither resolved to anything.
+      var hint = (msg.events && msg.events.length === 1)
+        ? msg.events[0].id
+        : (msg.taskEventHint ? matchEventByTitle(msg.taskEventHint, await Cal.loadEvents()) : null);
+      await saveToActionPage(msg.content, hint);
+      return;
+    }
+    if (label === 'Add event' || label === 'Create plan') {
+      await Cal.saveEvents(msg.events);
+      await Cal.saveEventTasks(msg.events);
+      return;
+    }
+    if (label === 'Remove event' || /^Remove \d+ events$/.test(label)) {
+      await Cal.deleteEvents(msg.removalIds);
+      return;
+    }
+    send(label);
+  }
+
+  if (!ready) return <LoadingScreen />;
+
+  var showSuggestions = messages.length <= 1 && !loading;
+
+  return (
+    <div style={{
+      maxWidth: 720, margin: '0 auto',
+      padding: '40px 24px 0',
+      display: 'flex', flexDirection: 'column',
+      height: '100vh',
+    }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
+        <div>
+          <h1 style={{ fontSize: 27, fontWeight: 700, letterSpacing: '-0.5px', lineHeight: 1.2, color: 'var(--text-primary)' }}>
+            Your{' '}
+            <span style={{
+              background: 'linear-gradient(130deg, var(--accent-primary), var(--accent-hover))',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            }}>assistant.</span>
+          </h1>
+          <p style={{ marginTop: 7, fontSize: 14, color: 'var(--text-secondary)', fontWeight: 400, lineHeight: 1.5 }}>
+            Schedule, goals, plans — ask me anything. ❆
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {messages.length > 1 && (
+            <button
+              onClick={clearHistory}
+              style={{
+                marginTop: 6, padding: '5px 13px', borderRadius: 20,
+                border: '1px solid var(--border)',
+                background: 'var(--surface-elevated)',
+                color: 'var(--text-muted)', fontSize: 12, fontWeight: 500,
+                cursor: 'pointer', fontFamily: 'inherit',
+                backdropFilter: 'blur(8px)',
+              }}
+            >Clear</button>
+          )}
+          {'speechSynthesis' in window && <VoiceToggleButton enabled={voiceEnabled} onToggle={toggleVoice} />}
+          <SettingsGear />
+        </div>
+      </div>
+
+      {/* ── Nav ── */}
+      <div style={{ marginBottom: 20 }}>
+        <Nav page="bot" />
+      </div>
+
+      {/* ── Chat area ── */}
+      <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>
+        {messages.map(function(msg, i) {
+          return <Message key={i} msg={msg} onAction={handleAction} onPickOption={handlePickOption} />;
+        })}
+        {loading && <BotStatus />}
+        {showSuggestions && <Suggestions onSelect={send} />}
+        <div ref={bottomRef} style={{ height: 8 }} />
+      </div>
+
+      {/* ── Input bar ── */}
+      <div style={{
+        paddingTop: 10, paddingBottom: 28,
+        background: 'linear-gradient(to top, var(--bg-primary) 55%, transparent)',
+      }}>
+        <div style={{
+          display: 'flex', gap: 10, alignItems: 'flex-end',
+          background: 'color-mix(in srgb, var(--surface) 75%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-primary) 28%, transparent)',
+          borderRadius: 24, padding: '10px 10px 10px 18px',
+          backdropFilter: 'blur(16px)',
+          boxShadow: '0 4px 24px color-mix(in srgb, var(--text-primary) 10%, transparent)',
+        }}>
+          <textarea
+            ref={inputRef}
+            value={input}
+            rows={1}
+            onChange={function(e) {
+              setInput(e.target.value);
+              e.target.style.height = 'auto';
+              e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+            }}
+            onKeyDown={function(e) {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }
+            }}
+            placeholder="Ask about your schedule, goals, or plans..."
+            style={{
+              flex: 1, border: 'none', resize: 'none',
+              background: 'transparent',
+              fontSize: 14, color: 'var(--text-primary)',
+              fontFamily: 'inherit', lineHeight: 1.5,
+              overflow: 'hidden', minHeight: 22,
+            }}
+          />
+          <MicButton
+            disabled={loading}
+            onInterimTranscript={setInput}
+            onFinalTranscript={function(transcript) { send(transcript); }}
+          />
+          <button
+            onClick={function() { send(input); }}
+            disabled={!input.trim() || loading}
+            style={{
+              width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+              background: (input.trim() && !loading)
+                ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-hover))'
+                : 'color-mix(in srgb, var(--text-muted) 40%, transparent)',
+              border: 'none',
+              cursor: (input.trim() && !loading) ? 'pointer' : 'default',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'white', fontSize: 18,
+              transition: 'background 0.15s ease',
+              boxShadow: (input.trim() && !loading) ? '0 3px 12px color-mix(in srgb, var(--accent-primary) 40%, transparent)' : 'none',
+            }}
+          >↑</button>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
