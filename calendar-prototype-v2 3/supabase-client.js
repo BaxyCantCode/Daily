@@ -135,14 +135,17 @@ Cal.getDisplayName = async function () {
   }
 };
 
-// Settings-page hook for editing the name later — not wired into a page yet,
-// but the profiles row + RLS ("update own row") already support it, so this
-// is just the one query away from a "change your name" field whenever one
-// gets added.
+// Wired into Settings -> Profile's "Edit" name field.
+// Uses upsert rather than a plain update: an update against a row that
+// doesn't exist yet matches zero rows and succeeds silently (no error from
+// Supabase), which is exactly what caused name edits to appear to work but
+// not actually save for any account whose profiles row was missing (e.g.
+// one created before the profiles trigger existed). Upsert self-heals that
+// case — see the "profiles: insert own row" RLS policy in sql/schema.sql.
 Cal.setDisplayName = async function (displayName) {
   const user = await Cal.getUser();
   if (!user) return false;
-  const { error } = await _sb.from('profiles').update({ display_name: (displayName || '').trim() }).eq('id', user.id);
+  const { error } = await _sb.from('profiles').upsert({ id: user.id, display_name: (displayName || '').trim() });
   if (error) { console.error('setDisplayName:', error.message); return false; }
   return true;
 };

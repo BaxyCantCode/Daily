@@ -464,24 +464,23 @@ function buildScheduleContext(botEvents, name) {
 function buildSystemPrompt(name) {
   var who = (name && name.trim()) ? name.trim() : 'the user';
   return [
-  "You are " + who + "'s personal life assistant — proactive, practical, and genuinely helpful across all areas of their life.",
+  "You are " + who + "'s scheduling assistant, built into this calendar app — your job is managing " + who + "'s calendar: viewing their schedule, adding events (including multi-day plans), removing events, and tracking action items/prep steps tied to those events. You are NOT a general-purpose chatbot and you don't have a broader personal-assistant role.",
   "Today is " + TODAY_LABEL + ".",
   "",
-  "You help with anything that makes " + who + "'s life better: scheduling and time management, fitness and workout programming,",
-  "nutrition and meal planning, grocery and shopping lists, habit building, goal setting, life organization,",
-  "travel planning, productivity, relationships, finances, and general advice. There is no topic that is outside your scope.",
-  "If " + who + " asks for help with something, help them — don't deflect or suggest they ask someone else.",
+  "STAY IN SCOPE — this is a hard rule:",
+  "- Only help with: viewing/summarizing " + who + "'s schedule, adding events to it, removing events from it, proposing quick-pick choices for scheduling decisions (see PROPOSING QUICK-PICK OPTIONS below), and capturing action items/prep steps tied to a specific event.",
+  "- If " + who + " asks for something that isn't about managing this calendar — general advice, factual trivia, writing help, a full workout program, a meal plan, a recipe, coding help, or anything else not about scheduling — respond in ONE short, friendly sentence that you're just the scheduling assistant for this app and can't help with that here, then ask if there's anything on their calendar you can help with instead. Do not attempt the off-topic request even partially, and do not lecture — one sentence, then stop.",
+  "- Exception: wanting to BLOCK CALENDAR TIME for something (e.g. 'add a workout Tuesday at 6am' or 'schedule meal prep Sunday evening') is always in scope as a normal ADD_EVENT — you're only ever declining to generate the workout program, meal plan, recipe, or other content itself, never declining to schedule time for it.",
   "",
   who + "'s actual current schedule is appended after this system prompt, under a CURRENT SCHEDULE heading — always check it before answering questions about their day/week, adding something that might duplicate an existing entry, or removing something by title.",
   "",
   "RESPONSE STYLE:",
   "- Keep responses short and conversational. 1-4 sentences for simple questions. Never over-explain.",
-  "- For lists (workouts, meals, shopping), use bullet points with • character. Keep each item concise.",
-  "- For structured plans, use short ALL-CAPS section headers (e.g. MONDAY, BREAKFAST, PROTEIN).",
+  "- For lists (multiple events, action items), use bullet points with • character. Keep each item concise.",
   "- Never use asterisks (* or **) for anything. No markdown bold, no markdown bullets.",
   "- No filler phrases like 'Great question!' or 'Certainly!' Just answer directly.",
-  "- Warm and human, but brief. If a plan needs detail, present it cleanly with headers and bullets.",
-  "- Never tell " + who + " something is outside your wheelhouse.",
+  "- Warm and human, but brief.",
+  "- For anything actually in scope (see STAY IN SCOPE above), never deflect or say it's outside your wheelhouse — just help.",
   "",
   "ADDING TO THE SCHEDULE:",
   "- You CAN actually add events to " + who + "'s schedule now (this changed — you're not limited to viewing it), including multi-day and multi-week plans in a single response — not just one event at a time.",
@@ -556,98 +555,14 @@ function buildDemo(name) {
     "Tell me what you want to fit in and I can block out real time for it.",
   ].join("\n"),
 
-  fitness: [
-    "Let's get you jacked, " + who,
-    "",
-    "Here's a 12-week Push/Pull/Legs hypertrophy program — let me know your usual workout time and I'll block it into your schedule:",
-    "",
-    "MON — Push (Chest, Shoulders, Tris)",
-    "  Bench Press         4×8",
-    "  Overhead Press      3×10",
-    "  Incline DB Press    3×10",
-    "  Lateral Raises      3×15",
-    "  Tricep Pushdowns    3×12",
-    "",
-    "WED — Pull (Back, Biceps)",
-    "  Deadlift            4×6",
-    "  Barbell Rows        4×8",
-    "  Pull-ups            3×max",
-    "  Face Pulls          3×15",
-    "  Barbell Curls       3×10",
-    "",
-    "FRI — Legs (Quads, Hams, Glutes)",
-    "  Squats              4×8",
-    "  Romanian Deadlifts  3×10",
-    "  Leg Press           3×12",
-    "  Leg Curls           3×12",
-    "  Calf Raises         4×15",
-    "",
-    "NUTRITION TARGETS",
-    "  Calories: ~2,900/day",
-    "  Protein: 185g  ·  Carbs: 330g  ·  Fat: 80g",
-    "",
-    "Want me to generate the meal plan and shopping list too?",
-  ].join("\n"),
-
-  meal: [
-    "High-protein meal plan to match your training goals:",
-    "",
-    "BREAKFAST  —  ~530 cal  ·  45g protein",
-    "  4 scrambled eggs + 2 turkey sausages",
-    "  1 cup oatmeal with mixed berries",
-    "  Black coffee",
-    "",
-    "LUNCH  —  ~620 cal  ·  55g protein",
-    "  200g grilled chicken breast",
-    "  1 cup brown rice + roasted veggies",
-    "  Greek yogurt (snack, ~30 min later)",
-    "",
-    "PRE-WORKOUT  —  ~200 cal",
-    "  Banana + 1 scoop whey protein",
-    "",
-    "DINNER  —  ~700 cal  ·  50g protein",
-    "  250g salmon or lean ground beef",
-    "  Sweet potato + leafy greens",
-    "  Drizzle of olive oil",
-    "",
-    "EVENING  —  ~150 cal  ·  25g protein",
-    "  Cottage cheese or casein shake",
-    "",
-    "Want me to build the shopping list for this week?",
-  ].join("\n"),
-
-  shopping: [
-    "Here's your grocery list",
-    "",
-    "PROTEIN",
-    "  • Chicken breast  2 lbs",
-    "  • Salmon fillets  1 lb",
-    "  • Lean ground beef  1 lb",
-    "  • Eggs  2 dozen",
-    "  • Turkey sausage  1 pack",
-    "  • Whey protein powder",
-    "  • Cottage cheese  2 containers",
-    "  • Greek yogurt  6-pack",
-    "",
-    "CARBS & PRODUCE",
-    "  • Brown rice  2 lb bag",
-    "  • Sweet potatoes  4",
-    "  • Rolled oats  large container",
-    "  • Bananas  bunch",
-    "  • Mixed berries  (frozen bag)",
-    "  • Broccoli + zucchini",
-    "  • Baby spinach  large bag",
-    "",
-    "FATS & MISC",
-    "  • Olive oil",
-    "  • Avocados  4",
-    "  • Almonds  small bag",
-    "  • Coffee beans",
-  ].join("\n"),
-
   add: "Done ❆ I've added that to your schedule. Head to the Calendar to see it on the grid.\n\nWant me to add any prep time or a reminder around it?",
 
-  fallback: "I can help with your schedule, free time, workout plans, meal plans, and shopping lists. Try asking:\n\n• \"What's my schedule today?\"\n• \"When am I free?\"\n• \"Build me a workout plan\"\n• \"Generate a grocery list\"",
+  // Shown for anything that isn't a recognized in-scope request — mirrors
+  // the live system prompt's STAY IN SCOPE rule (see buildSystemPrompt
+  // above) so the demo fallback (used when the live API is unreachable,
+  // e.g. no ANTHROPIC_API_KEY set) doesn't accidentally offer a broader
+  // chatbot experience than the real thing does.
+  fallback: "I'm just the scheduling assistant for this app, so I can only help with your calendar. Try asking:\n\n• \"What's my schedule today?\"\n• \"When am I free?\"\n• \"Add a dentist appointment Thursday at 2pm\"\n• \"Cancel my meeting with Sam\"",
   };
 }
 
@@ -659,15 +574,6 @@ function getDemoResponse(text, name) {
   }
   if (t.match(/free|available|open|gap|window|when can/)) {
     return { text: DEMO.free, actions: [] };
-  }
-  if (t.match(/jacked|muscle|bulk|hypertrophy|lift|strength|gains|workout plan|training plan|get fit|get strong/)) {
-    return { text: DEMO.fitness, actions: ['Generate meal plan', 'Build shopping list', 'Add gym sessions to calendar'] };
-  }
-  if (t.match(/meal plan|nutrition plan|diet|eating plan|food plan|macros|what (should i|to) eat/)) {
-    return { text: DEMO.meal, actions: ['Build shopping list'] };
-  }
-  if (t.match(/shop|grocer|grocery|buy|ingredient|list|prep.*list/)) {
-    return { text: DEMO.shopping, actions: ['Save to action page'] };
   }
   if (t.match(/add|create|schedule.*event|put.*calendar|block.*time|remind/)) {
     return { text: DEMO.add, actions: [] };
@@ -691,7 +597,19 @@ async function postChat(messages, maxTokens, systemPrompt) {
       messages: messages.map(function(m) { return { role: m.role, content: m.content }; }),
     }),
   });
-  if (!res.ok) throw new Error('status ' + res.status);
+  if (!res.ok) {
+    // api/chat.py returns a specific, readable message in the body for the
+    // most common failure (ANTHROPIC_API_KEY missing on Vercel) — surface
+    // that instead of a bare status code, so a misconfiguration shows up
+    // as an actual explanation in the chat instead of silently degrading
+    // to demo mode with no visible reason why.
+    var msg = 'status ' + res.status;
+    try {
+      var errBody = await res.json();
+      if (errBody && errBody.error) msg = errBody.error;
+    } catch (e) {}
+    throw new Error(msg);
+  }
   const data = await res.json();
   return data.content[0].text;
 }
@@ -752,7 +670,13 @@ async function callClaude(history, name) {
     return { text: cleanText, actions: actions, events: events, taskEventHint: eventTitleHint, quickOptions: quickOptions, removalIds: removalIds, conflicts: conflicts, scheduleContext: scheduleContext };
   } catch(e) {
     console.warn('Claude API error, falling back to demo:', e.message);
-    return getDemoResponse(history[history.length - 1].content, name);
+    // Surface the real reason right in the chat, not just the console —
+    // this is the difference between "the bot seems broken" (no signal at
+    // all) and "oh, the API key isn't set" (actionable). Demo replies still
+    // work underneath so the app never looks fully dead.
+    var demo = getDemoResponse(history[history.length - 1].content, name);
+    demo.text += '\n\n⚠️ Couldn\'t reach the live assistant (' + e.message + ') — showing a limited offline reply instead.';
+    return demo;
   }
 }
 
@@ -1303,8 +1227,8 @@ function Message({ msg, onAction, onPickOption }) {
 const SUGGESTIONS = [
   "What's my schedule today?",
   "When am I free this week?",
-  "I want to get jacked — build me a plan",
-  "Generate a grocery list",
+  "Add a dentist appointment Thursday at 2pm",
+  "What do I need to prep for tomorrow?",
 ];
 
 function Suggestions({ onSelect }) {
@@ -1450,7 +1374,7 @@ const STORAGE_KEY = 'cal_bot_history';
 // since the name itself only becomes available after an async call.
 function buildGreeting(name) {
   var who = (name && name.trim()) ? name.trim() : 'there';
-  return "Hey " + who + "! I'm your personal AI assistant ❆\n\nI can help with your schedule, fitness goals, meal planning, shopping lists, and anything else you want to get organised. What are we working on?";
+  return "Hey " + who + "! I'm your scheduling assistant ❆\n\nI can help you view your schedule, add or remove events, and track action items tied to them. What are we working on?";
 }
 
 function loadHistory(name) {
